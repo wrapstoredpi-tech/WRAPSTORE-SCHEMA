@@ -96,9 +96,25 @@ const Products = () => {
 
   const handleDelete = async () => {
     setDeleting(true)
-    const { error } = await supabase.from('products').update({ is_active: false }).eq('id', deleteId)
-    if (error) toast.error(error.message)
-    else { toast.success('Product removed.'); setDeleteId(null); fetchProducts() }
+    const { error } = await supabase.from('products').delete().eq('id', deleteId)
+    if (error) {
+      if (error.code === '23503') {
+        const { error: softErr } = await supabase.from('products').update({ is_active: false }).eq('id', deleteId)
+        if (softErr) {
+          toast.error(softErr.message)
+        } else {
+          toast.success('Product is linked to sales records, so it was archived.')
+          setDeleteId(null)
+          fetchProducts()
+        }
+      } else {
+        toast.error(error.message)
+      }
+    } else {
+      toast.success('Product deleted from database.')
+      setDeleteId(null)
+      fetchProducts()
+    }
     setDeleting(false)
   }
 
@@ -333,15 +349,15 @@ const Products = () => {
         <div className="modal-overlay" onClick={() => setDeleteId(null)}>
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">Remove Product</span>
+              <span className="modal-title">Delete Product</span>
             </div>
             <div className="modal-body" style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
-              Are you sure you want to remove this product? It will be hidden from all views.
+              Are you sure you want to delete this product? It will be permanently deleted from the database.
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setDeleteId(null)}>Cancel</button>
               <button className="btn btn-danger" onClick={handleDelete} disabled={deleting}>
-                {deleting ? <><div className="btn-spinner" /> Removing...</> : <><Trash2 size={13} /> Remove</>}
+                {deleting ? <><div className="btn-spinner" /> Deleting...</> : <><Trash2 size={13} /> Delete</>}
               </button>
             </div>
           </div>
