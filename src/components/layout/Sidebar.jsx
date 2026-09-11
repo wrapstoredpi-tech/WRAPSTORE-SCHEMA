@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Tag, Package, Warehouse,
+  LayoutDashboard, ShoppingBag, Tag, Package, Warehouse,
   Settings, LogOut, ShieldCheck, Smartphone,
   Receipt, FileText, Users, TrendingUp, Sparkles,
   BarChart2, FileBarChart, Activity
@@ -85,6 +85,7 @@ const Sidebar = () => {
         {/* Overview */}
         <div className="sidebar-section-label">Overview</div>
         <NavItem to="/dashboard" icon={LayoutDashboard} label="Dashboard" />
+        <NavItem to="/online-sales" icon={ShoppingBag} label="Online Sale" />
 
         {/* Billing & Sales */}
         <div style={{ height: '8px' }} />
@@ -124,20 +125,6 @@ const Sidebar = () => {
         <div style={{ height: '8px' }} />
         <div className="sidebar-section-label">System</div>
         <NavItem to="/settings" icon={Settings} label="Settings" />
-        <button
-          onClick={handleLogout}
-          className="sidebar-nav-item sidebar-logout-nav-item"
-          style={{
-            textDecoration: 'none',
-            border: 'none',
-            background: 'transparent',
-            width: '100%',
-            cursor: 'pointer',
-          }}
-        >
-          <LogOut size={16} strokeWidth={2} />
-          <span style={{ flex: 1, textAlign: 'left' }}>Log Out</span>
-        </button>
       </nav>
 
       {/* User Footer */}

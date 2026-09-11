@@ -7,8 +7,9 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
+// Format currency reliably for jsPDF standard fonts
 const INR = (val) =>
-  '\u20B9' + Number(val).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  'Rs. ' + Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const PAYMENT_METHOD_LABELS = {
   Cash: 'Cash',
@@ -46,13 +47,12 @@ export const generateInvoicePDF = async ({ invoice, items, store, logoUrl }) => 
 
   const W = 210   // page width mm
   const MARGIN = 14
-  const CONTENT_W = W - MARGIN * 2
+  const CONTENT_W = W - MARGIN * 2 // 182 mm
   let y = MARGIN
 
   // ---- COLORS ----
-  const BLACK = [10, 10, 10]
-  const GRAY = [100, 100, 100]
-  const LIGHT = [245, 245, 245]
+  const BLACK = [15, 23, 42]
+  const GRAY = [100, 116, 139]
   const WHITE = [255, 255, 255]
   const GREEN = [16, 185, 129]
 
@@ -63,144 +63,164 @@ export const generateInvoicePDF = async ({ invoice, items, store, logoUrl }) => 
   // HEADER: Logo + Store Info
   // ====================================================
 
-  // Try to embed logo
   let logoLoaded = false
   if (logoUrl) {
     try {
       const b64 = await urlToBase64(logoUrl)
       if (b64) {
-        doc.addImage(b64, 'JPEG', MARGIN, y, 45, 18)
+        doc.addImage(b64, 'JPEG', MARGIN, y, 45, 14)
         logoLoaded = true
       }
     } catch { /* skip */ }
   }
 
   if (!logoLoaded) {
-    // Fallback text logo
+    // Clean dual-box logo: [ WRAP ][ STORE ]
+    const boxH = 10
+    const boxW = 23
+
+    // Left box: Black filled
     doc.setFillColor(...BLACK)
-    doc.rect(MARGIN, y, 22, 12, 'F')
+    doc.rect(MARGIN, y, boxW, boxH, 'F')
     doc.setTextColor(...WHITE)
-    doc.setFontSize(11)
+    doc.setFontSize(10.5)
     doc.setFont('helvetica', 'bold')
-    doc.text('WRAP', MARGIN + 11, y + 8, { align: 'center' })
+    doc.text('WRAP', MARGIN + (boxW / 2), y + 6.8, { align: 'center' })
+
+    // Right box: Outlined
+    doc.setDrawColor(...BLACK)
+    doc.setLineWidth(0.4)
+    doc.rect(MARGIN + boxW, y, boxW, boxH, 'D')
     doc.setTextColor(...BLACK)
-    doc.setFontSize(11)
-    doc.text('STORE', MARGIN + 34, y + 8)
-    doc.setDrawColor(10, 10, 10)
-    doc.rect(MARGIN, y, 44, 12)
+    doc.setFontSize(10.5)
+    doc.setFont('helvetica', 'bold')
+    doc.text('STORE', MARGIN + boxW + (boxW / 2), y + 6.8, { align: 'center' })
   }
 
-  // Store info (right side)
+  // Store info (right side, clean formatting without duplicate lines)
   doc.setTextColor(...BLACK)
-  doc.setFontSize(8)
-  doc.setFont('helvetica', 'normal')
-  const storeLines = [
-    store?.store_name || 'WRAPSTORE',
-    store?.address || 'Railway Station Rd, Dharmapuri',
-    'Tamil Nadu, India - 636701',
-    store?.phone || '+91 81227 47947',
-    store?.gstin ? `GSTIN: ${store.gstin}` : '',
-  ].filter(Boolean)
-
   const storeInfoX = W - MARGIN
-  storeLines.forEach((line, i) => {
-    if (i === 0) { doc.setFont('helvetica', 'bold'); doc.setFontSize(9) }
-    else { doc.setFont('helvetica', 'normal'); doc.setFontSize(8) }
-    doc.text(line, storeInfoX, y + 4 + i * 4.5, { align: 'right' })
+  
+  const storeName = store?.store_name || 'WRAPSTORE'
+  const storeAddress = store?.address || 'Railway Station Rd, Dharmapuri, Tamil Nadu, India - 636701'
+  const storePhone = store?.phone ? `Ph: ${store.phone}` : 'Ph: +91 81227 47947'
+  const storeGstin = store?.gstin ? `GSTIN: ${store.gstin}` : ''
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(10)
+  doc.text(storeName, storeInfoX, y + 3.5, { align: 'right' })
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  doc.setTextColor(...GRAY)
+  
+  // Wrap address into lines
+  const addressLines = doc.splitTextToSize(storeAddress, 90)
+  let storeY = y + 8
+  addressLines.forEach(line => {
+    doc.text(line, storeInfoX, storeY, { align: 'right' })
+    storeY += 3.8
   })
 
-  y += 26
+  doc.text(storePhone, storeInfoX, storeY, { align: 'right' })
+  if (storeGstin) {
+    storeY += 3.8
+    doc.text(storeGstin, storeInfoX, storeY, { align: 'right' })
+  }
+
+  y = Math.max(y + 16, storeY + 4)
 
   // ---- DIVIDER ----
-  doc.setDrawColor(...BLACK)
-  doc.setLineWidth(0.8)
+  doc.setDrawColor(226, 232, 240)
+  doc.setLineWidth(0.5)
   doc.line(MARGIN, y, W - MARGIN, y)
-  y += 6
+  y += 5
 
   // ====================================================
-  // INVOICE TITLE + NUMBER
+  // INVOICE TITLE + NUMBER BAR
   // ====================================================
   doc.setFillColor(...BLACK)
-  doc.roundedRect(MARGIN, y, CONTENT_W, 10, 2, 2, 'F')
+  doc.roundedRect(MARGIN, y, CONTENT_W, 9, 1.5, 1.5, 'F')
   doc.setTextColor(...WHITE)
-  doc.setFontSize(12)
+  doc.setFontSize(11)
   doc.setFont('helvetica', 'bold')
-  doc.text('TAX INVOICE', MARGIN + 6, y + 7)
-  doc.setFontSize(10)
-  doc.text(invoice.invoice_number, W - MARGIN - 6, y + 7, { align: 'right' })
-  y += 16
+  doc.text('TAX INVOICE', MARGIN + 5, y + 6)
+  doc.setFontSize(9.5)
+  doc.text(invoice.invoice_number || '', W - MARGIN - 5, y + 6, { align: 'right' })
+  y += 14
 
   // ====================================================
   // INVOICE DETAILS + CUSTOMER DETAILS
   // ====================================================
-  doc.setTextColor(...BLACK)
-
-  const invoiceDate = new Date(invoice.created_at)
-  const dateStr = invoiceDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
+  const invoiceDate = new Date(invoice.created_at || Date.now())
+  const dateStr = invoiceDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
   const timeStr = invoiceDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
 
   const leftColX = MARGIN
-  const rightColX = MARGIN + CONTENT_W / 2 + 4
+  const rightColX = MARGIN + CONTENT_W / 2 + 10
 
+  let ly = y
   // Left: Invoice info
   doc.setFontSize(8)
   doc.setFont('helvetica', 'bold')
-  doc.text('INVOICE DETAILS', leftColX, y)
-  y += 5
+  doc.setTextColor(...BLACK)
+  doc.text('INVOICE DETAILS', leftColX, ly)
+  ly += 4.5
 
   const invoiceInfo = [
     ['Invoice No.', invoice.invoice_number],
     ['Date', dateStr],
     ['Time', timeStr],
-    ['Payment', PAYMENT_METHOD_LABELS[invoice.payment_method] || invoice.payment_method],
-    ['Status', invoice.payment_status],
+    ['Payment', PAYMENT_METHOD_LABELS[invoice.payment_method] || invoice.payment_method || 'Cash'],
+    ['Status', (invoice.payment_status || 'PAID').toUpperCase()],
   ]
 
   invoiceInfo.forEach(([label, value]) => {
     doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
     doc.setTextColor(...GRAY)
-    doc.text(label + ':', leftColX, y)
+    doc.text(label + ':', leftColX, ly)
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(...BLACK)
-    doc.text(value, leftColX + 28, y)
-    y += 5
+    doc.text(String(value || ''), leftColX + 24, ly)
+    ly += 4.5
   })
 
   // Right: Customer info
-  const customerStartY = y - (invoiceInfo.length * 5) - 5
-  let ry = customerStartY
-
+  let ry = y
   doc.setFontSize(8)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(...BLACK)
   doc.text('BILLED TO', rightColX, ry)
-  ry += 5
+  ry += 4.5
 
   const customerInfo = [
-    ['Name', invoice.customer_name],
-    ['Phone', invoice.customer_phone],
+    ['Name', invoice.customer_name || 'Walk-in Customer'],
+    ['Phone', invoice.customer_phone || '—'],
   ]
 
   customerInfo.forEach(([label, value]) => {
     doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
     doc.setTextColor(...GRAY)
     doc.text(label + ':', rightColX, ry)
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(...BLACK)
-    doc.text(value, rightColX + 18, ry)
-    ry += 5
+    doc.text(String(value || ''), rightColX + 16, ry)
+    ry += 4.5
   })
 
-  y = Math.max(y, ry) + 4
+  y = Math.max(ly, ry) + 3
 
   // ---- DIVIDER ----
-  doc.setDrawColor(220, 220, 220)
-  doc.setLineWidth(0.3)
+  doc.setDrawColor(226, 232, 240)
+  doc.setLineWidth(0.4)
   doc.line(MARGIN, y, W - MARGIN, y)
-  y += 6
+  y += 5
 
   // ====================================================
   // ITEMS TABLE
+  // Exact column width budget = 182 mm
   // ====================================================
   const tableColumns = [
     { header: '#', dataKey: 'no' },
@@ -216,13 +236,13 @@ export const generateInvoicePDF = async ({ invoice, items, store, logoUrl }) => 
 
   const tableRows = items.map((item, idx) => ({
     no: idx + 1,
-    name: item.product_name,
-    code: item.product_id_code,
+    name: item.product_name || 'Product',
+    code: item.product_id_code || '—',
     model: item.mobile_model || '—',
     qty: item.quantity,
     price: INR(item.unit_price),
-    disc: item.discount_pct + '%',
-    gst: item.gst_pct + '%',
+    disc: (item.discount_pct || 0) + '%',
+    gst: (item.gst_pct || 0) + '%',
     total: INR(item.line_total),
   }))
 
@@ -234,82 +254,91 @@ export const generateInvoicePDF = async ({ invoice, items, store, logoUrl }) => 
     headStyles: {
       fillColor: BLACK,
       textColor: WHITE,
-      fontSize: 8,
+      fontSize: 7.5,
       fontStyle: 'bold',
-      cellPadding: 3,
+      cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
+      valign: 'middle',
+      halign: 'left',
     },
     bodyStyles: {
-      fontSize: 8,
-      cellPadding: 3,
+      fontSize: 7.5,
+      cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
       textColor: BLACK,
+      valign: 'middle',
     },
-    alternateRowStyles: { fillColor: [250, 250, 250] },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
     columnStyles: {
-      0: { cellWidth: 7, halign: 'center' },
-      1: { cellWidth: 58 },
-      2: { cellWidth: 20 },
-      3: { cellWidth: 26 },
-      4: { cellWidth: 9, halign: 'center' },
-      5: { cellWidth: 22, halign: 'right' },
-      6: { cellWidth: 11, halign: 'center' },
-      7: { cellWidth: 11, halign: 'center' },
-      8: { cellWidth: 22, halign: 'right' },
+      0: { cellWidth: 8, halign: 'center' },   // #
+      1: { cellWidth: 46 },                     // Product
+      2: { cellWidth: 20 },                     // ID
+      3: { cellWidth: 24 },                     // Model
+      4: { cellWidth: 12, halign: 'center' },   // Qty
+      5: { cellWidth: 22, halign: 'right' },    // Unit Price
+      6: { cellWidth: 13, halign: 'center' },   // Disc%
+      7: { cellWidth: 13, halign: 'center' },   // GST%
+      8: { cellWidth: 24, halign: 'right' },    // Total
     },
     margin: { left: MARGIN, right: MARGIN },
     styles: { overflow: 'linebreak', font: 'helvetica' },
   })
 
-  y = doc.lastAutoTable.finalY + 8
+  y = doc.lastAutoTable.finalY + 6
 
   // ====================================================
   // TOTALS SECTION
   // ====================================================
-  const totalsX = W - MARGIN - 72
-  const totalsW = 72
+  const totalsW = 74
+  const totalsX = W - MARGIN - totalsW
 
-  doc.setDrawColor(220, 220, 220)
-  doc.setLineWidth(0.3)
+  doc.setDrawColor(226, 232, 240)
+  doc.setLineWidth(0.4)
   doc.line(totalsX, y, W - MARGIN, y)
-  y += 4
+  y += 3.5
 
   const totalsRows = [
     ['Subtotal', INR(invoice.subtotal)],
-    invoice.discount_amount > 0 ? ['Discount', '- ' + INR(invoice.discount_amount)] : null,
+    Number(invoice.discount_amount) > 0 ? ['Discount', '- ' + INR(invoice.discount_amount)] : null,
     ['Taxable Amount', INR(invoice.taxable_amount)],
     ['GST', INR(invoice.gst_amount)],
   ].filter(Boolean)
 
   totalsRows.forEach(([label, value]) => {
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8.5)
+    doc.setFontSize(8)
     doc.setTextColor(...GRAY)
     doc.text(label, totalsX + 2, y)
     doc.setTextColor(...BLACK)
-    doc.text(value, W - MARGIN - 2, y, { align: 'right' })
-    y += 5.5
+    doc.text(String(value), W - MARGIN - 2, y, { align: 'right' })
+    y += 5
   })
 
   // Grand total box
   y += 1
+  const boxHeight = 8.5
   doc.setFillColor(...BLACK)
-  doc.roundedRect(totalsX, y - 1, totalsW, 10, 1.5, 1.5, 'F')
+  doc.roundedRect(totalsX, y, totalsW, boxHeight, 1.2, 1.2, 'F')
+  
   doc.setTextColor(...WHITE)
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9.5)
-  doc.text('GRAND TOTAL', totalsX + 4, y + 6.5)
-  doc.setFontSize(11)
-  doc.text(INR(invoice.grand_total), W - MARGIN - 4, y + 6.5, { align: 'right' })
-  y += 18
+  doc.setFontSize(8.5)
+  doc.text('GRAND TOTAL', totalsX + 4, y + 5.5)
+  
+  doc.setFontSize(10)
+  doc.text(INR(invoice.grand_total), W - MARGIN - 4, y + 5.5, { align: 'right' })
+  y += boxHeight + 4
 
   // Payment method badge
-  doc.setFillColor(240, 255, 248)
+  const badgeMethod = PAYMENT_METHOD_LABELS[invoice.payment_method] || invoice.payment_method || 'Cash'
+  doc.setFillColor(240, 253, 244)
   doc.setDrawColor(...GREEN)
-  doc.roundedRect(totalsX, y, totalsW, 7, 1, 1, 'FD')
-  doc.setTextColor(10, 100, 60)
+  doc.setLineWidth(0.3)
+  doc.roundedRect(totalsX, y, totalsW, 6.5, 1, 1, 'FD')
+  
+  doc.setTextColor(22, 101, 52)
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(8)
-  doc.text('Paid via ' + (PAYMENT_METHOD_LABELS[invoice.payment_method] || invoice.payment_method), totalsX + totalsW / 2, y + 4.5, { align: 'center' })
-  y += 14
+  doc.setFontSize(7.5)
+  doc.text('Paid via ' + badgeMethod, totalsX + (totalsW / 2), y + 4.2, { align: 'center' })
+  y += 12
 
   // ====================================================
   // NOTES
@@ -319,19 +348,19 @@ export const generateInvoicePDF = async ({ invoice, items, store, logoUrl }) => 
     doc.setFontSize(8)
     doc.setTextColor(...GRAY)
     doc.text('Note: ' + invoice.notes, MARGIN, y)
-    y += 8
+    y += 6
   }
 
   // ====================================================
   // FOOTER
   // ====================================================
   const footerY = 282
-  doc.setDrawColor(200, 200, 200)
-  doc.setLineWidth(0.3)
-  doc.line(MARGIN, footerY - 6, W - MARGIN, footerY - 6)
+  doc.setDrawColor(226, 232, 240)
+  doc.setLineWidth(0.4)
+  doc.line(MARGIN, footerY - 5, W - MARGIN, footerY - 5)
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
+  doc.setFontSize(8.5)
   doc.setTextColor(...BLACK)
   const thankYou = store?.invoice_footer || 'Thank you for shopping at WrapStore!'
   doc.text(thankYou, W / 2, footerY, { align: 'center' })
@@ -339,8 +368,8 @@ export const generateInvoicePDF = async ({ invoice, items, store, logoUrl }) => 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(7.5)
   doc.setTextColor(...GRAY)
-  doc.text('This is a computer-generated invoice and does not require a physical signature.', W / 2, footerY + 5, { align: 'center' })
-  doc.text(`${store?.store_name || 'WRAPSTORE'} · ${store?.phone || '+91 81227 47947'}`, W / 2, footerY + 9, { align: 'center' })
+  doc.text('This is a computer-generated invoice and does not require a physical signature.', W / 2, footerY + 4.5, { align: 'center' })
+  doc.text(`${storeName} · ${storePhone}`, W / 2, footerY + 8.5, { align: 'center' })
 
   return doc
 }
@@ -369,3 +398,4 @@ export const getInvoicePDFBlob = async (params) => {
   const doc = await generateInvoicePDF(params)
   return doc.output('blob')
 }
+

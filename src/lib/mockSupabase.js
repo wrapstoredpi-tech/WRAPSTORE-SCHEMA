@@ -442,8 +442,8 @@ class QueryBuilder {
   async _execute() {
     await new Promise(r => setTimeout(r, 80)) // simulate network delay
 
+    if (!mockDB[this._table]) mockDB[this._table] = []
     const table = mockDB[this._table]
-    if (!table) return { data: null, error: { message: `Table ${this._table} not found` } }
 
     if (this._operation === 'select') {
       let rows = this._applyFilters(table)

@@ -471,5 +471,24 @@ CREATE TABLE IF NOT EXISTS payments (
   payment_method TEXT NOT NULL,
   reference      TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+/*
+CREATE TABLE IF NOT EXISTS online_sales (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  product_id      UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  quantity        INT NOT NULL DEFAULT 1,
+  channel         TEXT DEFAULT 'Website',
+  unit_price      NUMERIC(10,2) DEFAULT 0,
+  total_amount    NUMERIC(10,2) DEFAULT 0,
+  customer_name   TEXT,
+  notes           TEXT,
+  sale_date       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE online_sales ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Authenticated can manage online sales" ON online_sales;
+CREATE POLICY "Authenticated can manage online sales"
+  ON online_sales FOR ALL
+  TO authenticated USING (TRUE) WITH CHECK (TRUE);
 */

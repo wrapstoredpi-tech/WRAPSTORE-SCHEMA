@@ -19,7 +19,7 @@ import Customers from './pages/Customers'
 import Sales from './pages/Sales'
 import SmartInventory from './pages/SmartInventory'
 import Reports from './pages/Reports'
-
+import OnlineSales from './pages/OnlineSales'
 
 const ProtectedRoute = ({ children, requireSuperAdmin = false }) => {
   const { user, profile, loading } = useAuth()
@@ -76,6 +76,7 @@ const AppRoutes = () => (
     <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
       <Route index element={<Navigate to="/dashboard" replace />} />
       <Route path="dashboard" element={<Dashboard />} />
+      <Route path="online-sales" element={<OnlineSales />} />
 
       {/* Stage 1 — Products & Inventory */}
       <Route path="categories" element={<Categories />} />
