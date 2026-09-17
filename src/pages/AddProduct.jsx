@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
 const IPHONE_MODELS = [
+  'iPhone 18 Pro Max', 'iPhone 18 Pro', 'iPhone 18 Plus', 'iPhone 18',
   'iPhone 17 Pro Max', 'iPhone 17 Pro', 'iPhone 17 Plus', 'iPhone 17',
   'iPhone 16 Pro Max', 'iPhone 16 Pro', 'iPhone 16 Plus', 'iPhone 16',
   'iPhone 15 Pro Max', 'iPhone 15 Pro', 'iPhone 15 Plus', 'iPhone 15',
@@ -18,7 +19,8 @@ const IPHONE_MODELS = [
 
 const IPHONE_SERIES = [
   { label: 'All Models', filter: () => IPHONE_MODELS },
-  { label: 'iPhone 13 to 17 Series', filter: () => IPHONE_MODELS.filter(m => /iPhone (1[3-7])/.test(m)) },
+  { label: 'iPhone 13 to 18 Series', filter: () => IPHONE_MODELS.filter(m => /iPhone (1[3-8])/.test(m)) },
+  { label: 'iPhone 18 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 18')) },
   { label: 'iPhone 17 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 17')) },
   { label: 'iPhone 16 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 16')) },
   { label: 'iPhone 15 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 15')) },
