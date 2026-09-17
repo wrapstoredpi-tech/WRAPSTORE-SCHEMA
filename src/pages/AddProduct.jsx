@@ -361,7 +361,7 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
         purchase_price: Number(form.purchase_price),
         selling_price: Number(form.selling_price),
         discount_percentage: Number(form.discount_percentage) || 0,
-        gst_percentage: Number(form.gst_percentage) || 18,
+        gst_percentage: isNaN(Number(form.gst_percentage)) ? 18 : Number(form.gst_percentage),
         current_stock: productId ? undefined : Number(form.initial_stock) || 0,
         min_stock_level: Number(form.min_stock_level) || 5,
         created_by: user?.id,

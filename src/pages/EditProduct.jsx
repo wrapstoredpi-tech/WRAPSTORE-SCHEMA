@@ -54,7 +54,7 @@ const EditProduct = () => {
     purchase_price: product.purchase_price?.toString() || '',
     selling_price: product.selling_price?.toString() || '',
     discount_percentage: product.discount_percentage?.toString() || '0',
-    gst_percentage: product.gst_percentage?.toString() || '18',
+    gst_percentage: product.gst_percentage != null ? product.gst_percentage.toString() : '18',
     min_stock_level: product.min_stock_level?.toString() || '5',
   }
 
