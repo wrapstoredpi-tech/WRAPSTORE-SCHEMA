@@ -895,29 +895,15 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
                     {errors.selling_price && <div className="form-error">{errors.selling_price}</div>}
                   </div>
                 </div>
-                <div className="form-row">
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Discount (%)</label>
-                    <input
-                      type="number"
-                      className="form-input"
-                      placeholder="0"
-                      min="0"
-                      max="100"
-                      value={form.discount_percentage}
-                      onChange={e => set('discount_percentage', e.target.value)}
-                    />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">GST (%)</label>
-                    <select
-                      className="form-select"
-                      value={form.gst_percentage}
-                      onChange={e => set('gst_percentage', e.target.value)}
-                    >
-                      {GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}
-                    </select>
-                  </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">GST (%)</label>
+                  <select
+                    className="form-select"
+                    value={form.gst_percentage}
+                    onChange={e => set('gst_percentage', e.target.value)}
+                  >
+                    {GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}
+                  </select>
                 </div>
 
                 {form.selling_price && (
@@ -926,12 +912,6 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
                       <span>Selling Price:</span>
                       <span style={{ fontWeight: 600 }}>₹{Number(form.selling_price).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                     </div>
-                    {Number(form.discount_percentage) > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <span>After Discount ({form.discount_percentage}%):</span>
-                        <span style={{ fontWeight: 600 }}>₹{(Number(form.selling_price) * (1 - Number(form.discount_percentage) / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                      </div>
-                    )}
                     {Number(form.gst_percentage) > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span>Price + GST ({form.gst_percentage}%):</span>
