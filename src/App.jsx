@@ -21,57 +21,13 @@ import SmartInventory from './pages/SmartInventory'
 import Reports from './pages/Reports'
 import OnlineSales from './pages/OnlineSales'
 
-const ProtectedRoute = ({ children, requireSuperAdmin = false }) => {
-  const { user, profile, loading } = useAuth()
-
-  if (loading) {
-    return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        background: '#f4f5f7',
-        flexDirection: 'column',
-        gap: '14px',
-        color: '#6b7280',
-        fontSize: '14px',
-      }}>
-        <div className="spinner" />
-        Loading WrapStore...
-      </div>
-    )
-  }
-
-  if (!user) return <Navigate to="/login" replace />
-  if (requireSuperAdmin && profile?.role !== 'super_admin') {
-    return <Navigate to="/dashboard" replace />
-  }
-  return children
-}
-
-const PublicRoute = ({ children }) => {
-  const { user, loading } = useAuth()
-  if (loading) {
-    return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        background: '#0a0a0a',
-      }}>
-        <div className="spinner" style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.2)' }} />
-      </div>
-    )
-  }
-  if (user) return <Navigate to="/dashboard" replace />
+const ProtectedRoute = ({ children }) => {
   return children
 }
 
 const AppRoutes = () => (
   <Routes>
-    <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+    <Route path="/login" element={<Navigate to="/dashboard" replace />} />
 
     <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
       <Route index element={<Navigate to="/dashboard" replace />} />
