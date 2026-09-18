@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   Plus, ChevronDown, ChevronRight, Edit2, Trash2,
-  Tag, X, Check, FolderOpen, AlertCircle
+  Tag, X, Check, FolderOpen, AlertCircle, Database
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
@@ -11,8 +11,7 @@ import {
   fetchMergedCategories,
   deleteCategoryCascade,
   deleteSubcategoryCascade,
-  unmarkCategoryDeleted,
-  unmarkSubcategoryDeleted,
+  clearDeletedCategoryKeys,
   getLocalCats,
   saveLocalCats,
 } from '../lib/categoryStorage'
@@ -89,7 +88,7 @@ const DeleteConfirm = ({ name, onConfirm, onClose, loading }) => (
           <div>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Delete "{name}"?</div>
             <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              This action cannot be undone. It will be permanently removed from database and UI.
+              This action cannot be undone. It will be removed from database and UI.
             </div>
           </div>
         </div>
@@ -109,6 +108,7 @@ const Categories = () => {
   const [expanded, setExpanded] = useState({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [rlsNotice, setRlsNotice] = useState(false)
 
   // Modals
   const [addCatModal, setAddCatModal] = useState(false)
@@ -120,7 +120,11 @@ const Categories = () => {
 
   const loadCategories = async () => {
     setLoading(true)
-    const merged = await fetchMergedCategories()
+    clearDeletedCategoryKeys() // Clear legacy local blacklists
+    const { categories: merged, dbError } = await fetchMergedCategories()
+    if (dbError && dbError.code === '42501') {
+      setRlsNotice(true)
+    }
     setCategories(merged)
     setLoading(false)
   }
@@ -136,9 +140,6 @@ const Categories = () => {
     setSaving(true)
     const slug = slugify(name)
     const newCatUuid = generateUuid()
-    unmarkCategoryDeleted(name)
-    unmarkCategoryDeleted(slug)
-    unmarkCategoryDeleted(newCatUuid)
 
     const newCatObj = {
       id: newCatUuid,
@@ -149,7 +150,7 @@ const Categories = () => {
       subcategories: [],
     }
 
-    // Always attempt Supabase DB insert
+    // Attempt Supabase DB insert
     const { error } = await supabase.from('categories').insert({
       id: newCatUuid,
       name,
@@ -159,13 +160,21 @@ const Categories = () => {
     })
 
     if (error) {
-      console.warn('DB insert failed for category, persisting to local storage:', error.message)
+      console.warn('DB insert failed for category:', error.message)
+      if (error.code === '42501') {
+        setRlsNotice(true)
+        toast.error('Database Row Level Security (RLS) blocked DB save. Please run database/fix_rls_policies.sql in Supabase SQL Editor.')
+      } else {
+        toast.error(`Database error: ${error.message}`)
+      }
+    } else {
+      toast.success('Category added to database!')
     }
-    // Also save to local storage for immediate UI persistence & fallback
+
+    // Save to local storage fallback
     const local = getLocalCats()
     saveLocalCats([...local.filter(c => c.name.toLowerCase() !== name.toLowerCase() && c.slug !== slug), newCatObj])
 
-    toast.success('Category added!')
     setAddCatModal(false)
     await loadCategories()
     setSaving(false)
@@ -174,15 +183,18 @@ const Categories = () => {
   const handleEditCategory = async (name, description) => {
     setSaving(true)
     const slug = slugify(name)
-    unmarkCategoryDeleted(name)
-    unmarkCategoryDeleted(slug)
 
     if (isValidUuid(editCatModal.id)) {
-      await supabase.from('categories').update({
+      const { error } = await supabase.from('categories').update({
         name,
         slug,
         description: description || null,
       }).eq('id', editCatModal.id)
+
+      if (error && error.code === '42501') {
+        setRlsNotice(true)
+        toast.error('DB update blocked by RLS policies.')
+      }
     }
 
     const local = getLocalCats()
@@ -198,8 +210,13 @@ const Categories = () => {
   const handleDeleteCategory = async () => {
     setSaving(true)
     if (deleteCatModal) {
-      await deleteCategoryCascade(deleteCatModal)
-      toast.success('Category deleted!')
+      const { error } = await deleteCategoryCascade(deleteCatModal)
+      if (error && error.code === '42501') {
+        setRlsNotice(true)
+        toast.error('Database deletion blocked by RLS policies. Please run SQL fix script in Supabase Dashboard.')
+      } else {
+        toast.success('Category deleted!')
+      }
       setDeleteCatModal(null)
       await loadCategories()
     }
@@ -211,14 +228,10 @@ const Categories = () => {
     setSaving(true)
     const slug = slugify(name)
     const newSubUuid = generateUuid()
-    unmarkSubcategoryDeleted(name)
-    unmarkSubcategoryDeleted(slug)
-    unmarkSubcategoryDeleted(newSubUuid)
 
     const parentCat = categories.find(c => c.id === addSubModal)
     let parentCatUuid = addSubModal
 
-    // If parent category is not a valid UUID in DB (e.g. locally created), try creating it in DB first
     if (!isValidUuid(parentCatUuid) && parentCat) {
       const dbParentUuid = generateUuid()
       const { error: catErr } = await supabase.from('categories').insert({
@@ -251,10 +264,15 @@ const Categories = () => {
       })
       if (error) {
         console.warn('DB subcategory insert error:', error.message)
+        if (error.code === '42501') {
+          setRlsNotice(true)
+          toast.error('DB subcategory insert blocked by RLS policies.')
+        }
+      } else {
+        toast.success('Subcategory added to database!')
       }
     }
 
-    // Save locally under parent category
     const local = getLocalCats()
     if (parentCat) {
       const existingIdx = local.findIndex(
@@ -272,7 +290,6 @@ const Categories = () => {
       saveLocalCats(local)
     }
 
-    toast.success('Subcategory added!')
     setAddSubModal(null)
     await loadCategories()
     setSaving(false)
@@ -281,15 +298,17 @@ const Categories = () => {
   const handleEditSub = async (name, description) => {
     setSaving(true)
     const slug = slugify(name)
-    unmarkSubcategoryDeleted(name)
-    unmarkSubcategoryDeleted(slug)
 
     if (isValidUuid(editSubModal.id)) {
-      await supabase.from('subcategories').update({
+      const { error } = await supabase.from('subcategories').update({
         name,
         slug,
         description: description || null,
       }).eq('id', editSubModal.id)
+      if (error && error.code === '42501') {
+        setRlsNotice(true)
+        toast.error('DB update blocked by RLS policies.')
+      }
     }
 
     toast.success('Subcategory updated!')
@@ -301,8 +320,13 @@ const Categories = () => {
   const handleDeleteSub = async () => {
     setSaving(true)
     if (deleteSubModal) {
-      await deleteSubcategoryCascade(deleteSubModal)
-      toast.success('Subcategory deleted!')
+      const { error } = await deleteSubcategoryCascade(deleteSubModal)
+      if (error && error.code === '42501') {
+        setRlsNotice(true)
+        toast.error('Database deletion blocked by RLS policies.')
+      } else {
+        toast.success('Subcategory deleted!')
+      }
       setDeleteSubModal(null)
       await loadCategories()
     }
@@ -320,6 +344,27 @@ const Categories = () => {
           <Plus size={14} /> Add Category
         </button>
       </div>
+
+      {rlsNotice && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          color: '#f87171',
+          fontSize: '13px',
+        }}>
+          <Database size={20} style={{ flexShrink: 0 }} />
+          <div>
+            <strong>Action Required for Database Sync:</strong> Supabase Row Level Security (RLS) is currently blocking direct DB additions and deletions.
+            Please run <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px', color: '#fff' }}>database/fix_rls_policies.sql</code> in your Supabase SQL Editor to allow database syncing.
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="loading-overlay"><div className="spinner" /></div>

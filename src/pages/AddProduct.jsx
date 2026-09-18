@@ -4,7 +4,7 @@ import { ArrowLeft, Upload, X, Star, Image as ImageIcon, Save, Info, Edit3, Plus
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { fetchMergedCategories, getDeletedSubcategoryKeys } from '../lib/categoryStorage'
+import { fetchMergedCategories } from '../lib/categoryStorage'
 
 const IPHONE_MODELS = [
   'iPhone 18 Pro Max', 'iPhone 18 Pro', 'iPhone 18 Plus', 'iPhone 18',
@@ -177,7 +177,7 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
-    fetchMergedCategories().then(cats => setCategories(cats))
+    fetchMergedCategories().then(res => setCategories(res.categories || []))
   }, [])
 
   useEffect(() => {
@@ -187,15 +187,7 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
         setSubcategories(selectedCat.subcategories)
       } else if (isValidUuid(form.category_id)) {
         supabase.from('subcategories').select('*').eq('category_id', form.category_id).order('sort_order')
-          .then(({ data }) => {
-            const deletedSubKeys = new Set(getDeletedSubcategoryKeys().map(k => String(k).toLowerCase()))
-            const filtered = (data || []).filter(s =>
-              !deletedSubKeys.has(String(s.id).toLowerCase()) &&
-              !deletedSubKeys.has(String(s.slug).toLowerCase()) &&
-              !deletedSubKeys.has(String(s.name).toLowerCase())
-            )
-            setSubcategories(filtered)
-          })
+          .then(({ data }) => setSubcategories(data || []))
       } else {
         setSubcategories([])
       }
