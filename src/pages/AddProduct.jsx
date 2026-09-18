@@ -321,7 +321,6 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
 
   const validate = () => {
     const e = {}
-    if (!form.name.trim()) e.name = 'Product name is required'
     if (!form.product_type && !form.category_id) e.product_type = 'Product category is required'
     if (!form.selling_price || Number(form.selling_price) <= 0) e.selling_price = 'Valid selling price required'
     if (!form.purchase_price || Number(form.purchase_price) < 0) e.purchase_price = 'Valid purchase price required'
@@ -349,8 +348,23 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
 
       const colorsStr = selectedColors.length > 0 ? selectedColors.join(', ') : null
 
+      const generateProductName = () => {
+        if (form.name && form.name.trim()) return form.name.trim()
+        const brand = form.mobile_brand && form.mobile_brand !== 'Universal' ? form.mobile_brand : ''
+        const catObj = activeCategories.find(c => c.id === form.category_id)
+        const catName = catObj ? catObj.name : 'Product'
+        let modelSummary = ''
+        if (selectedModels.length === 1) {
+          modelSummary = selectedModels[0]
+        } else if (selectedModels.length > 1) {
+          modelSummary = `${selectedModels[0]} +${selectedModels.length - 1} models`
+        }
+        const parts = [brand, modelSummary, catName].filter(Boolean)
+        return parts.join(' ') || 'New Product'
+      }
+
       const payload = {
-        name: form.name.trim(),
+        name: generateProductName(),
         product_type: resolveProductType(),
         category_id: form.category_id || null,
         subcategory_id: form.subcategory_id || null,
@@ -460,18 +474,6 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
               <div className="card-header"><span className="card-title">Basic Information</span></div>
               <div className="card-body">
                 <div className="form-group">
-                  <label className="form-label">Product Name <span className="required">*</span></label>
-                  <input
-                    className={`form-input ${errors.name ? 'error' : ''}`}
-                    placeholder="e.g. iPhone 16 Pro Max Transparent Case"
-                    value={form.name}
-                    onChange={e => set('name', e.target.value)}
-                    id="product-name"
-                  />
-                  {errors.name && <div className="form-error">{errors.name}</div>}
-                </div>
-
-                <div className="form-group">
                   <label className="form-label">Product Category <span className="required">*</span></label>
                   <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                     {activeCategories.map(cat => {
@@ -518,205 +520,218 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
                   {errors.product_type && <div className="form-error">{errors.product_type}</div>}
                 </div>
 
-                {/* Mobile Brand & Model Compatibility */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '18px' }}>
-                  <div className="form-row">
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Brand Compatibility</label>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        {['Apple', 'Samsung', 'Universal'].map(b => (
-                          <button
-                            key={b}
-                            type="button"
-                            className={`btn btn-sm ${form.mobile_brand === b ? 'btn-primary' : 'btn-secondary'}`}
-                            style={{ padding: '6px 12px', fontSize: '12px' }}
-                            onClick={() => {
-                              set('mobile_brand', b)
-                              setSelectedModels([])
-                            }}
-                          >
-                            {b}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {form.mobile_brand !== 'Universal' && (
-                      <div className="form-group" style={{ marginBottom: 0 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <label className="form-label" style={{ marginBottom: 0 }}>
-                            Compatible Mobile Models <span className="required">*</span>
-                          </label>
-                          <span style={{ fontSize: '12px', fontWeight: 700, color: selectedModels.length > 0 ? '#10b981' : 'var(--text-muted)' }}>
-                            {selectedModels.length} Selected
-                          </span>
-                        </div>
-                      </div>
-                    )}
+                {/* Brand Compatibility */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Brand Compatibility</label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {['Apple', 'Samsung', 'Universal'].map(b => (
+                      <button
+                        key={b}
+                        type="button"
+                        className={`btn btn-sm ${form.mobile_brand === b ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ padding: '6px 12px', fontSize: '12px' }}
+                        onClick={() => {
+                          set('mobile_brand', b)
+                          setSelectedModels([])
+                        }}
+                      >
+                        {b}
+                      </button>
+                    ))}
                   </div>
+                </div>
+              </div>
+            </div>
 
-                    {/* Multi-Select Component Container */}
-                    {form.mobile_brand !== 'Universal' && modelOptions.length > 0 && (
-                      <div style={{
-                        border: `1.5px solid ${errors.mobile_model ? 'var(--danger)' : 'var(--border-strong)'}`,
-                        borderRadius: 'var(--radius)',
-                        padding: '12px',
-                        background: '#fafafa',
-                      }}>
-                        {/* Quick Series Select Buttons */}
-                        <div style={{ marginBottom: '10px' }}>
-                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            Quick Series Select
-                          </div>
-                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            {seriesOptions.map((series, idx) => {
-                              const modelsInSeries = series.filter()
-                              const isFullySelected = modelsInSeries.length > 0 && modelsInSeries.every(m => selectedModels.includes(m))
-                              return (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() => handleSeriesToggle(series.filter)}
-                                  style={{
-                                    fontSize: '11px',
-                                    padding: '4px 10px',
-                                    borderRadius: 'var(--radius-full)',
-                                    border: isFullySelected ? '1px solid #10b981' : '1px solid #d1d5db',
-                                    background: isFullySelected ? '#ecfdf5' : '#ffffff',
-                                    color: isFullySelected ? '#047857' : '#374151',
-                                    fontWeight: isFullySelected ? 700 : 500,
-                                    cursor: 'pointer',
-                                    transition: 'all 0.15s ease',
-                                  }}
-                                >
-                                  {isFullySelected ? '✓ ' : '+ '}{series.label}
-                                </button>
-                              )
-                            })}
-                            {selectedModels.length > 0 && (
+            {/* Variants Tile */}
+            <div className="card">
+              <div className="card-header"><span className="card-title">Variants</span></div>
+              <div className="card-body">
+                {/* Compatible Mobile Models */}
+                {form.mobile_brand !== 'Universal' && modelOptions.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>
+                        Compatible Mobile Models <span className="required">*</span>
+                      </label>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: selectedModels.length > 0 ? '#10b981' : 'var(--text-muted)' }}>
+                        {selectedModels.length} Selected
+                      </span>
+                    </div>
+
+                    <div style={{
+                      border: `1.5px solid ${errors.mobile_model ? 'var(--danger)' : 'var(--border-strong)'}`,
+                      borderRadius: 'var(--radius)',
+                      padding: '12px',
+                      background: '#fafafa',
+                    }}>
+                      {/* Quick Series Select Buttons */}
+                      <div style={{ marginBottom: '12px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Quick Series Select
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          {seriesOptions.map((series, idx) => {
+                            const modelsInSeries = series.filter()
+                            const isFullySelected = modelsInSeries.length > 0 && modelsInSeries.every(m => selectedModels.includes(m))
+                            return (
                               <button
+                                key={idx}
                                 type="button"
-                                onClick={clearAllModels}
+                                onClick={() => handleSeriesToggle(series.filter)}
                                 style={{
                                   fontSize: '11px',
                                   padding: '4px 10px',
                                   borderRadius: 'var(--radius-full)',
-                                  border: '1px solid #fca5a5',
-                                  background: '#fef2f2',
-                                  color: '#dc2626',
-                                  fontWeight: 600,
+                                  border: isFullySelected ? '1px solid #10b981' : '1px solid #d1d5db',
+                                  background: isFullySelected ? '#ecfdf5' : '#ffffff',
+                                  color: isFullySelected ? '#047857' : '#374151',
+                                  fontWeight: isFullySelected ? 700 : 500,
                                   cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
                                 }}
                               >
-                                Clear All ({selectedModels.length})
+                                {isFullySelected ? '✓ ' : '+ '}{series.label}
                               </button>
-                            )}
-                          </div>
+                            )
+                          })}
+                          {selectedModels.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={clearAllModels}
+                              style={{
+                                fontSize: '11px',
+                                padding: '4px 10px',
+                                borderRadius: 'var(--radius-full)',
+                                border: '1px solid #fca5a5',
+                                background: '#fef2f2',
+                                color: '#dc2626',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Clear All ({selectedModels.length})
+                            </button>
+                          )}
                         </div>
+                      </div>
 
-                        {/* Selected Models Badges */}
-                        {selectedModels.length > 0 && (
+                      {/* Display Selected Models as Multi-Select Buttons */}
+                      {selectedModels.length > 0 && (
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Selected Models
+                          </div>
                           <div style={{
                             display: 'flex',
                             gap: '6px',
                             flexWrap: 'wrap',
-                            maxHeight: '85px',
+                            maxHeight: '120px',
                             overflowY: 'auto',
                             padding: '8px',
                             background: '#ffffff',
                             borderRadius: 'var(--radius)',
                             border: '1px solid var(--border)',
-                            marginBottom: '10px',
                           }}>
                             {selectedModels.map(m => (
-                              <span
+                              <button
                                 key={m}
+                                type="button"
+                                onClick={() => toggleModel(m)}
                                 style={{
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  gap: '4px',
+                                  gap: '6px',
                                   background: '#111827',
                                   color: '#ffffff',
-                                  fontSize: '11px',
+                                  fontSize: '12px',
                                   fontWeight: 600,
-                                  padding: '3px 8px',
-                                  borderRadius: '12px',
+                                  padding: '5px 12px',
+                                  borderRadius: 'var(--radius-full)',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                                  transition: 'all 0.15s ease',
                                 }}
                               >
-                                {m}
-                                <X
-                                  size={12}
-                                  style={{ cursor: 'pointer', opacity: 0.8 }}
-                                  onClick={() => toggleModel(m)}
-                                />
-                              </span>
+                                <span>✓ {m}</span>
+                                <X size={12} style={{ opacity: 0.8 }} />
+                              </button>
                             ))}
                           </div>
-                        )}
-
-                        {/* Search Filter Input */}
-                        <div style={{ marginBottom: '8px' }}>
-                          <input
-                            type="text"
-                            className="form-input"
-                            placeholder={`Search ${form.mobile_brand || 'mobile'} models...`}
-                            value={modelSearch}
-                            onChange={e => setModelSearch(e.target.value)}
-                            style={{ fontSize: '12px', padding: '6px 10px', background: '#ffffff' }}
-                          />
                         </div>
+                      )}
 
-                        {/* Checkbox Grid */}
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
-                          gap: '4px',
-                          maxHeight: '180px',
-                          overflowY: 'auto',
-                          padding: '6px',
-                          background: '#ffffff',
-                          borderRadius: 'var(--radius)',
-                          border: '1px solid var(--border)',
-                        }}>
-                          {modelOptions
-                            .filter(m => m.toLowerCase().includes(modelSearch.toLowerCase()))
-                            .map(m => {
-                              const checked = selectedModels.includes(m)
-                              return (
-                                <label
-                                  key={m}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px',
-                                    padding: '5px 8px',
-                                    borderRadius: '4px',
-                                    background: checked ? '#f3f4f6' : 'transparent',
-                                    border: checked ? '1px solid #d1d5db' : '1px solid transparent',
-                                    cursor: 'pointer',
-                                    fontSize: '12px',
-                                    fontWeight: checked ? 600 : 400,
-                                    color: checked ? '#111827' : '#4b5563',
-                                    userSelect: 'none',
-                                  }}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => toggleModel(m)}
-                                    style={{ accentColor: '#111827', width: '14px', height: '14px', cursor: 'pointer' }}
-                                  />
-                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</span>
-                                </label>
-                              )
-                            })}
-                        </div>
+                      {/* Search Filter Input */}
+                      <div style={{ marginBottom: '8px' }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder={`Search ${form.mobile_brand || 'mobile'} models...`}
+                          value={modelSearch}
+                          onChange={e => setModelSearch(e.target.value)}
+                          style={{ fontSize: '12px', padding: '6px 10px', background: '#ffffff' }}
+                        />
                       </div>
-                    )}
+
+                      {/* Checkbox Grid */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+                        gap: '4px',
+                        maxHeight: '180px',
+                        overflowY: 'auto',
+                        padding: '6px',
+                        background: '#ffffff',
+                        borderRadius: 'var(--radius)',
+                        border: '1px solid var(--border)',
+                      }}>
+                        {modelOptions
+                          .filter(m => m.toLowerCase().includes(modelSearch.toLowerCase()))
+                          .map(m => {
+                            const checked = selectedModels.includes(m)
+                            return (
+                              <label
+                                key={m}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  padding: '5px 8px',
+                                  borderRadius: '4px',
+                                  background: checked ? '#f3f4f6' : 'transparent',
+                                  border: checked ? '1px solid #d1d5db' : '1px solid transparent',
+                                  cursor: 'pointer',
+                                  fontSize: '12px',
+                                  fontWeight: checked ? 600 : 400,
+                                  color: checked ? '#111827' : '#4b5563',
+                                  userSelect: 'none',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleModel(m)}
+                                  style={{ accentColor: '#111827', width: '14px', height: '14px', cursor: 'pointer' }}
+                                />
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</span>
+                              </label>
+                            )
+                          })}
+                      </div>
+                    </div>
                     {errors.mobile_model && <div className="form-error">{errors.mobile_model}</div>}
                   </div>
+                ) : (
+                  <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+                    {form.mobile_brand === 'Universal'
+                      ? 'Universal compatibility selected (no model variants required).'
+                      : 'Select a brand compatibility in Basic Information to configure model variants.'}
+                  </div>
+                )}
 
                 {/* Colour Variants Selection */}
-                <div className="form-group" style={{ marginBottom: '18px' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <label className="form-label" style={{ marginBottom: 0 }}>
                       Colour Variants
@@ -816,17 +831,6 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
                       </button>
                     )}
                   </div>
-                </div>
-
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Description</label>
-                  <textarea
-                    className="form-textarea"
-                    placeholder="Describe the product, its features, materials, compatibility..."
-                    value={form.description}
-                    onChange={e => set('description', e.target.value)}
-                    rows={3}
-                  />
                 </div>
               </div>
             </div>
