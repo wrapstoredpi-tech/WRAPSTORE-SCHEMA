@@ -70,7 +70,19 @@ const Dashboard = () => {
         supabase.from('invoice_items').select('*').order('created_at', { ascending: false }),
       ])
 
-      setProducts(prodData || [])
+      const localProdsStr = localStorage.getItem('wrapstore_custom_products_v1')
+      let localProds = []
+      try { localProds = localProdsStr ? JSON.parse(localProdsStr) : [] } catch (e) {}
+
+      const dbProds = prodData || []
+      const mergedProds = [...dbProds]
+      for (const lp of localProds) {
+        if (lp.is_active !== false && !mergedProds.some(p => p.id === lp.id || (p.product_id && p.product_id === lp.product_id))) {
+          mergedProds.push(lp)
+        }
+      }
+
+      setProducts(mergedProds)
       setInvoices(invData || [])
       setInvoiceItems(itemData || [])
     } catch (err) {
@@ -90,17 +102,18 @@ const Dashboard = () => {
     const todayInvoices = invoices.filter(i => i.created_at?.startsWith(todayStr))
     const todaySales = todayInvoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
 
-    const approved = products.filter(p => p.approval_status === 'APPROVED')
+    const approved = products.filter(p => p.approval_status === 'APPROVED' || !p.approval_status)
     const pendingApproval = products.filter(p => p.approval_status === 'PENDING_APPROVAL')
-    const totalStock = approved.reduce((s, p) => s + Number(p.current_stock || 0), 0)
-    const inventoryValue = approved.reduce((s, p) => s + Number(p.current_stock || 0) * Number(p.selling_price || 0), 0)
-    const lowStock = approved.filter(p => Number(p.current_stock || 0) > 0 && Number(p.current_stock || 0) <= Number(p.min_stock_level || 5))
-    const outOfStock = approved.filter(p => Number(p.current_stock || 0) === 0)
+    const activeCatalog = products.length > 0 ? products : []
+    const totalStock = activeCatalog.reduce((s, p) => s + Number(p.current_stock || 0), 0)
+    const inventoryValue = activeCatalog.reduce((s, p) => s + Number(p.current_stock || 0) * Number(p.selling_price || 0), 0)
+    const lowStock = activeCatalog.filter(p => Number(p.current_stock || 0) > 0 && Number(p.current_stock || 0) <= Number(p.min_stock_level || 5))
+    const outOfStock = activeCatalog.filter(p => Number(p.current_stock || 0) === 0)
 
     return {
       todaySales,
       todayInvoicesCount: todayInvoices.length,
-      totalProducts: approved.length,
+      totalProducts: products.length,
       pendingApprovalCount: pendingApproval.length,
       totalStock,
       inventoryValue,
