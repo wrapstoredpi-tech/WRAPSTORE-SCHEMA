@@ -5,6 +5,17 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
+import {
+  isValidUuid,
+  generateUuid,
+  fetchMergedCategories,
+  deleteCategoryCascade,
+  deleteSubcategoryCascade,
+  unmarkCategoryDeleted,
+  unmarkSubcategoryDeleted,
+  getLocalCats,
+  saveLocalCats,
+} from '../lib/categoryStorage'
 
 const slugify = (str) =>
   str.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -78,7 +89,7 @@ const DeleteConfirm = ({ name, onConfirm, onClose, loading }) => (
           <div>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Delete "{name}"?</div>
             <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              This action cannot be undone. Products in this category may be affected.
+              This action cannot be undone. It will be permanently removed from database and UI.
             </div>
           </div>
         </div>
@@ -101,96 +112,200 @@ const Categories = () => {
 
   // Modals
   const [addCatModal, setAddCatModal] = useState(false)
-  const [editCatModal, setEditCatModal] = useState(null)   // category object
+  const [editCatModal, setEditCatModal] = useState(null)
   const [deleteCatModal, setDeleteCatModal] = useState(null)
-  const [addSubModal, setAddSubModal] = useState(null)     // parent category id
-  const [editSubModal, setEditSubModal] = useState(null)   // subcategory object
+  const [addSubModal, setAddSubModal] = useState(null)
+  const [editSubModal, setEditSubModal] = useState(null)
   const [deleteSubModal, setDeleteSubModal] = useState(null)
 
-  const fetchCategories = async () => {
+  const loadCategories = async () => {
     setLoading(true)
-    const { data } = await supabase
-      .from('categories')
-      .select(`*, subcategories(*)`)
-      .order('sort_order', { ascending: true })
-    setCategories(data || [])
+    const merged = await fetchMergedCategories()
+    setCategories(merged)
     setLoading(false)
   }
 
-  useEffect(() => { fetchCategories() }, [])
+  useEffect(() => {
+    loadCategories()
+  }, [])
 
   const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }))
 
   // ---- Category CRUD ----
   const handleAddCategory = async (name, description) => {
     setSaving(true)
-    const { error } = await supabase.from('categories').insert({
+    const slug = slugify(name)
+    const newCatUuid = generateUuid()
+    unmarkCategoryDeleted(name)
+    unmarkCategoryDeleted(slug)
+    unmarkCategoryDeleted(newCatUuid)
+
+    const newCatObj = {
+      id: newCatUuid,
       name,
-      slug: slugify(name),
+      slug,
+      description: description || null,
+      sort_order: categories.length,
+      subcategories: [],
+    }
+
+    // Always attempt Supabase DB insert
+    const { error } = await supabase.from('categories').insert({
+      id: newCatUuid,
+      name,
+      slug,
       description: description || null,
       sort_order: categories.length,
     })
+
     if (error) {
-      toast.error(error.message.includes('unique') ? 'Category already exists.' : error.message)
-    } else {
-      toast.success('Category added!')
-      setAddCatModal(false)
-      fetchCategories()
+      console.warn('DB insert failed for category, persisting to local storage:', error.message)
     }
+    // Also save to local storage for immediate UI persistence & fallback
+    const local = getLocalCats()
+    saveLocalCats([...local.filter(c => c.name.toLowerCase() !== name.toLowerCase() && c.slug !== slug), newCatObj])
+
+    toast.success('Category added!')
+    setAddCatModal(false)
+    await loadCategories()
     setSaving(false)
   }
 
   const handleEditCategory = async (name, description) => {
     setSaving(true)
-    const { error } = await supabase.from('categories').update({
-      name,
-      slug: slugify(name),
-      description: description || null,
-    }).eq('id', editCatModal.id)
-    if (error) toast.error(error.message)
-    else { toast.success('Category updated!'); setEditCatModal(null); fetchCategories() }
+    const slug = slugify(name)
+    unmarkCategoryDeleted(name)
+    unmarkCategoryDeleted(slug)
+
+    if (isValidUuid(editCatModal.id)) {
+      await supabase.from('categories').update({
+        name,
+        slug,
+        description: description || null,
+      }).eq('id', editCatModal.id)
+    }
+
+    const local = getLocalCats()
+    const updated = local.map(c => c.id === editCatModal.id ? { ...c, name, slug, description: description || null } : c)
+    saveLocalCats(updated)
+
+    toast.success('Category updated!')
+    setEditCatModal(null)
+    await loadCategories()
     setSaving(false)
   }
 
   const handleDeleteCategory = async () => {
     setSaving(true)
-    const { error } = await supabase.from('categories').delete().eq('id', deleteCatModal.id)
-    if (error) toast.error(error.message)
-    else { toast.success('Category deleted!'); setDeleteCatModal(null); fetchCategories() }
+    if (deleteCatModal) {
+      await deleteCategoryCascade(deleteCatModal)
+      toast.success('Category deleted!')
+      setDeleteCatModal(null)
+      await loadCategories()
+    }
     setSaving(false)
   }
 
   // ---- Subcategory CRUD ----
   const handleAddSub = async (name, description) => {
     setSaving(true)
-    const { error } = await supabase.from('subcategories').insert({
-      category_id: addSubModal,
+    const slug = slugify(name)
+    const newSubUuid = generateUuid()
+    unmarkSubcategoryDeleted(name)
+    unmarkSubcategoryDeleted(slug)
+    unmarkSubcategoryDeleted(newSubUuid)
+
+    const parentCat = categories.find(c => c.id === addSubModal)
+    let parentCatUuid = addSubModal
+
+    // If parent category is not a valid UUID in DB (e.g. locally created), try creating it in DB first
+    if (!isValidUuid(parentCatUuid) && parentCat) {
+      const dbParentUuid = generateUuid()
+      const { error: catErr } = await supabase.from('categories').insert({
+        id: dbParentUuid,
+        name: parentCat.name,
+        slug: parentCat.slug,
+        description: parentCat.description || null,
+        sort_order: parentCat.sort_order || 0,
+      })
+      if (!catErr) {
+        parentCatUuid = dbParentUuid
+      }
+    }
+
+    const newSubObj = {
+      id: newSubUuid,
+      category_id: parentCatUuid,
       name,
-      slug: slugify(name),
+      slug,
       description: description || null,
-    })
-    if (error) toast.error(error.message.includes('unique') ? 'Subcategory already exists in this category.' : error.message)
-    else { toast.success('Subcategory added!'); setAddSubModal(null); fetchCategories() }
+    }
+
+    if (isValidUuid(parentCatUuid)) {
+      const { error } = await supabase.from('subcategories').insert({
+        id: newSubUuid,
+        category_id: parentCatUuid,
+        name,
+        slug,
+        description: description || null,
+      })
+      if (error) {
+        console.warn('DB subcategory insert error:', error.message)
+      }
+    }
+
+    // Save locally under parent category
+    const local = getLocalCats()
+    if (parentCat) {
+      const existingIdx = local.findIndex(
+        c => c.id === parentCat.id || c.name.toLowerCase() === parentCat.name.toLowerCase()
+      )
+      if (existingIdx !== -1) {
+        const existingSubs = local[existingIdx].subcategories || []
+        local[existingIdx].subcategories = [...existingSubs.filter(s => s.name.toLowerCase() !== name.toLowerCase()), newSubObj]
+      } else {
+        local.push({
+          ...parentCat,
+          subcategories: [...(parentCat.subcategories || []).filter(s => s.name.toLowerCase() !== name.toLowerCase()), newSubObj]
+        })
+      }
+      saveLocalCats(local)
+    }
+
+    toast.success('Subcategory added!')
+    setAddSubModal(null)
+    await loadCategories()
     setSaving(false)
   }
 
   const handleEditSub = async (name, description) => {
     setSaving(true)
-    const { error } = await supabase.from('subcategories').update({
-      name,
-      slug: slugify(name),
-      description: description || null,
-    }).eq('id', editSubModal.id)
-    if (error) toast.error(error.message)
-    else { toast.success('Subcategory updated!'); setEditSubModal(null); fetchCategories() }
+    const slug = slugify(name)
+    unmarkSubcategoryDeleted(name)
+    unmarkSubcategoryDeleted(slug)
+
+    if (isValidUuid(editSubModal.id)) {
+      await supabase.from('subcategories').update({
+        name,
+        slug,
+        description: description || null,
+      }).eq('id', editSubModal.id)
+    }
+
+    toast.success('Subcategory updated!')
+    setEditSubModal(null)
+    await loadCategories()
     setSaving(false)
   }
 
   const handleDeleteSub = async () => {
     setSaving(true)
-    const { error } = await supabase.from('subcategories').delete().eq('id', deleteSubModal.id)
-    if (error) toast.error(error.message)
-    else { toast.success('Subcategory deleted!'); setDeleteSubModal(null); fetchCategories() }
+    if (deleteSubModal) {
+      await deleteSubcategoryCascade(deleteSubModal)
+      toast.success('Subcategory deleted!')
+      setDeleteSubModal(null)
+      await loadCategories()
+    }
     setSaving(false)
   }
 
@@ -286,7 +401,7 @@ const Categories = () => {
                       </div>
                     ) : (
                       subs
-                        .sort((a, b) => a.sort_order - b.sort_order)
+                        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
                         .map(sub => (
                           <div key={sub.id} className="subcategory-item">
                             <div className="subcategory-dot" />

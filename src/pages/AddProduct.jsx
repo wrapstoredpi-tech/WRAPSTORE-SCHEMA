@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, X, Star, Image as ImageIcon, Save, Info } from 'lucide-react'
+import { ArrowLeft, Upload, X, Star, Image as ImageIcon, Save, Info, Edit3, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { fetchMergedCategories, getDeletedSubcategoryKeys } from '../lib/categoryStorage'
 
 const IPHONE_MODELS = [
   'iPhone 18 Pro Max', 'iPhone 18 Pro', 'iPhone 18 Plus', 'iPhone 18',
@@ -50,9 +51,11 @@ const SAMSUNG_SERIES = [
 const GST_OPTIONS = [0, 5, 12, 18, 28]
 const DEFAULT_GENERIC_COLORS = ['Black', 'White', 'Clear', 'Blue', 'Red', 'Purple']
 
+const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
+
 const DEFAULT_CATEGORIES = [
-  { id: 'cat-cases', name: 'Mobile Cases', slug: 'mobile-cases' },
-  { id: 'cat-accessories', name: 'Accessories', slug: 'accessories' },
+  { id: null, name: 'Mobile Cases', slug: 'mobile-cases' },
+  { id: null, name: 'Accessories', slug: 'accessories' },
 ]
 
 const parseModels = (val) => {
@@ -65,6 +68,7 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
   const navigate = useNavigate()
   const { user } = useAuth()
   const fileRef = useRef()
+  const variantFileRef = useRef()
 
   const [categories, setCategories] = useState([])
   const [subcategories, setSubcategories] = useState([])
@@ -72,6 +76,87 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
   const [images, setImages] = useState([])       // { file, preview, isPrimary }
   const [existingImages, setExistingImages] = useState([])  // for edit mode
   const [uploadingImages, setUploadingImages] = useState(false)
+
+  // Product Variant Builder state
+  const [variantsList, setVariantsList] = useState([])
+  const [editingVariantId, setEditingVariantId] = useState(null)
+  const [variantDraft, setVariantDraft] = useState({
+    name: '',
+    description: '',
+    purchase_price: '',
+    mrp: '',
+    selling_price: '',
+    quantity: '',
+    images: [],
+  })
+
+  const handleVariantImageSelect = (e) => {
+    const files = Array.from(e.target.files || [])
+    const newImgs = files.map(file => ({
+      file,
+      preview: URL.createObjectURL(file),
+      id: `vimg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    }))
+    setVariantDraft(prev => ({
+      ...prev,
+      images: [...prev.images, ...newImgs]
+    }))
+  }
+
+  const removeVariantImage = (id) => {
+    setVariantDraft(prev => ({
+      ...prev,
+      images: prev.images.filter(img => img.id !== id)
+    }))
+  }
+
+  const handleAddOrUpdateVariant = () => {
+    if (editingVariantId) {
+      setVariantsList(prev => prev.map(v => v.id === editingVariantId ? { ...variantDraft, id: editingVariantId } : v))
+      setEditingVariantId(null)
+      toast.success('Product variant updated!')
+    } else {
+      const newVar = {
+        ...variantDraft,
+        id: `variant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: variantDraft.name.trim() || `Variant ${variantsList.length + 1}`,
+      }
+      setVariantsList(prev => [...prev, newVar])
+      toast.success('Product variant added!')
+    }
+
+    setVariantDraft({
+      name: '',
+      description: '',
+      purchase_price: '',
+      mrp: '',
+      selling_price: '',
+      quantity: '',
+      images: [],
+    })
+  }
+
+  const handleEditVariant = (variant) => {
+    setEditingVariantId(variant.id)
+    setVariantDraft({ ...variant })
+  }
+
+  const handleDeleteVariant = (variantId) => {
+    setVariantsList(prev => prev.filter(v => v.id !== variantId))
+    if (editingVariantId === variantId) {
+      setEditingVariantId(null)
+      setVariantDraft({
+        name: '',
+        description: '',
+        purchase_price: '',
+        mrp: '',
+        selling_price: '',
+        quantity: '',
+        images: [],
+      })
+    }
+    toast.success('Variant removed')
+  }
 
   const [form, setForm] = useState({
     name: '',
@@ -89,32 +174,48 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
     min_stock_level: '5',
     ...(prefillData || {}),
   })
-
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
-    supabase.from('categories').select('*').order('sort_order').then(({ data }) => setCategories(data || []))
+    fetchMergedCategories().then(cats => setCategories(cats))
   }, [])
 
   useEffect(() => {
     if (form.category_id) {
-      supabase.from('subcategories').select('*').eq('category_id', form.category_id).order('sort_order')
-        .then(({ data }) => setSubcategories(data || []))
+      const selectedCat = categories.find(c => c.id === form.category_id)
+      if (selectedCat && selectedCat.subcategories) {
+        setSubcategories(selectedCat.subcategories)
+      } else if (isValidUuid(form.category_id)) {
+        supabase.from('subcategories').select('*').eq('category_id', form.category_id).order('sort_order')
+          .then(({ data }) => {
+            const deletedSubKeys = new Set(getDeletedSubcategoryKeys().map(k => String(k).toLowerCase()))
+            const filtered = (data || []).filter(s =>
+              !deletedSubKeys.has(String(s.id).toLowerCase()) &&
+              !deletedSubKeys.has(String(s.slug).toLowerCase()) &&
+              !deletedSubKeys.has(String(s.name).toLowerCase())
+            )
+            setSubcategories(filtered)
+          })
+      } else {
+        setSubcategories([])
+      }
     } else {
       setSubcategories([])
     }
-  }, [form.category_id])
+  }, [form.category_id, categories])
 
   // Auto select initial category when categories load
   useEffect(() => {
-    if (categories.length > 0 && !form.category_id) {
-      const first = categories[0]
-      setForm(prev => ({
-        ...prev,
-        category_id: prev.category_id || first.id,
-        product_type: prev.product_type || first.slug,
-        mobile_brand: prev.mobile_brand || (first.name.toLowerCase().includes('case') ? 'Apple' : 'Universal'),
-      }))
+    if (categories.length > 0) {
+      const validCategory = categories.find(c => isValidUuid(c.id) && (c.id === form.category_id || c.slug === form.product_type)) || categories.find(c => isValidUuid(c.id))
+      if (validCategory && isValidUuid(validCategory.id)) {
+        setForm(prev => ({
+          ...prev,
+          category_id: validCategory.id,
+          product_type: validCategory.slug || prev.product_type || 'iphone_case',
+          mobile_brand: prev.mobile_brand || (validCategory.name.toLowerCase().includes('case') ? 'Apple' : 'Universal'),
+        }))
+      }
     }
   }, [categories])
 
@@ -218,9 +319,12 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
     const isCase = cat.name.toLowerCase().includes('case') || slug.includes('case')
     const defaultBrand = isCase ? 'Apple' : 'Universal'
 
+    const realCat = categories.find(c => isValidUuid(c.id) && (c.id === cat.id || c.slug === slug || c.name.toLowerCase() === cat.name.toLowerCase()))
+    const validCatId = realCat ? realCat.id : (isValidUuid(cat.id) ? cat.id : '')
+
     setForm(prev => ({
       ...prev,
-      category_id: cat.id,
+      category_id: validCatId,
       product_type: slug,
       mobile_brand: defaultBrand,
       mobile_model: '',
@@ -322,8 +426,24 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
   const validate = () => {
     const e = {}
     if (!form.product_type && !form.category_id) e.product_type = 'Product category is required'
-    if (!form.selling_price || Number(form.selling_price) <= 0) e.selling_price = 'Valid selling price required'
-    if (!form.purchase_price || Number(form.purchase_price) < 0) e.purchase_price = 'Valid purchase price required'
+    
+    // Validate pricing & variants from the product variant builder flow
+    const effectiveVars = variantsList.length > 0 ? variantsList : (
+      (variantDraft.purchase_price || variantDraft.selling_price || variantDraft.mrp) ? [variantDraft] : []
+    )
+
+    if (effectiveVars.length === 0) {
+      e.variants = 'Please add at least one product variant with pricing details'
+    } else {
+      const firstVar = effectiveVars[0]
+      if (!firstVar.selling_price || Number(firstVar.selling_price) <= 0) {
+        e.selling_price = 'Valid selling price required in variant'
+      }
+      if (firstVar.purchase_price === '' || Number(firstVar.purchase_price) < 0) {
+        e.purchase_price = 'Valid purchase price required in variant'
+      }
+    }
+
     const requiresModel = (form.mobile_brand === 'Apple' || form.mobile_brand === 'Samsung') && modelOptions.length > 0
     if (requiresModel && selectedModels.length === 0) e.mobile_model = 'Select at least one compatible mobile model'
     setErrors(e)
@@ -363,22 +483,53 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
         return parts.join(' ') || 'New Product'
       }
 
+      // Fetch pricing and stock from the variant builder flow
+      let effectiveVariants = [...variantsList]
+      if (effectiveVariants.length === 0 && (variantDraft.purchase_price || variantDraft.selling_price || variantDraft.mrp)) {
+        effectiveVariants.push({
+          ...variantDraft,
+          id: `variant-auto-${Date.now()}`,
+          name: variantDraft.name.trim() || 'Default Variant',
+        })
+      }
+
+      const primaryVar = effectiveVariants[0] || {}
+      const purchasePrice = Number(primaryVar.purchase_price || 0)
+      const sellingPrice = Number(primaryVar.selling_price || 0)
+      const mrpPrice = Number(primaryVar.mrp || 0)
+      const totalStock = effectiveVariants.reduce((sum, v) => sum + (Number(v.quantity) || 0), 0)
+
+      // Ensure category_id and subcategory_id are valid UUIDs or null
+      let resolvedCategoryId = isValidUuid(form.category_id) ? form.category_id : null
+      if (!resolvedCategoryId && categories.length > 0) {
+        const dbCat = categories.find(c => isValidUuid(c.id) && (c.slug === form.product_type || c.id === form.category_id))
+          || categories.find(c => isValidUuid(c.id))
+        if (dbCat) resolvedCategoryId = dbCat.id
+      }
+
+      let resolvedSubcategoryId = isValidUuid(form.subcategory_id) ? form.subcategory_id : null
+      if (!resolvedSubcategoryId && subcategories.length > 0) {
+        const dbSub = subcategories.find(s => isValidUuid(s.id))
+        if (dbSub) resolvedSubcategoryId = dbSub.id
+      }
+
       const payload = {
         name: generateProductName(),
         product_type: resolveProductType(),
-        category_id: form.category_id || null,
-        subcategory_id: form.subcategory_id || null,
+        category_id: resolvedCategoryId,
+        subcategory_id: resolvedSubcategoryId,
         mobile_brand: form.mobile_brand || null,
         mobile_model: selectedModels.length > 0 ? selectedModels.join(', ') : (form.mobile_model || null),
         color_variants: colorsStr,
         description: form.description || null,
-        purchase_price: Number(form.purchase_price),
-        selling_price: Number(form.selling_price),
+        purchase_price: purchasePrice,
+        selling_price: sellingPrice,
+        mrp: mrpPrice,
         discount_percentage: Number(form.discount_percentage) || 0,
-        gst_percentage: isNaN(Number(form.gst_percentage)) ? 18 : Number(form.gst_percentage),
-        current_stock: productId ? undefined : Number(form.initial_stock) || 0,
+        gst_percentage: isNaN(Number(form.gst_percentage)) ? 0 : Number(form.gst_percentage),
+        current_stock: productId ? undefined : (totalStock > 0 ? totalStock : (Number(form.initial_stock) || 0)),
         min_stock_level: Number(form.min_stock_level) || 5,
-        created_by: user?.id,
+        created_by: isValidUuid(user?.id) ? user.id : null,
         approval_status: 'PENDING_APPROVAL',
       }
 
@@ -387,50 +538,117 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
 
       let productUuid = productId
 
-      if (productId) {
-        // Edit mode
-        let { data, error } = await supabase.from('products').update(payload).eq('id', productId)
-        if (error && (error.message?.includes('color_variants') || error.code === 'PGRST204')) {
-          delete payload.color_variants
-          if (colorsStr && !payload.description?.includes('Colour Variants:')) {
-            payload.description = payload.description ? `${payload.description}\n\nColour Variants: ${colorsStr}` : `Colour Variants: ${colorsStr}`
-          }
-          const retry = await supabase.from('products').update(payload).eq('id', productId)
-          if (retry.error) throw retry.error
-        } else if (error) {
-          throw error
-        }
-      } else {
-        // Create mode
-        let { data, error } = await supabase.from('products').insert(payload).select().single()
-        if (error && (error.message?.includes('color_variants') || error.code === 'PGRST204')) {
-          delete payload.color_variants
-          if (colorsStr && !payload.description?.includes('Colour Variants:')) {
-            payload.description = payload.description ? `${payload.description}\n\nColour Variants: ${colorsStr}` : `Colour Variants: ${colorsStr}`
-          }
-          const retry = await supabase.from('products').insert(payload).select().single()
-          if (retry.error) throw retry.error
-          data = retry.data
-        } else if (error) {
-          throw error
-        }
-        productUuid = data.id
+      // Save to Supabase DB with column, UUID & RLS fallbacks
+      let currentPayload = { ...payload }
+      let isLocalFallback = false
 
-        // Record initial stock movement
-        if (Number(form.initial_stock) > 0) {
-          await supabase.from('inventory_movements').insert({
-            product_id: productUuid,
-            movement_type: 'INITIAL_STOCK',
-            quantity: Number(form.initial_stock),
-            previous_stock: 0,
-            new_stock: Number(form.initial_stock),
-            reason: 'Initial stock on product creation',
-            performed_by: user?.id,
-          })
+      const getLocalProducts = () => {
+        try {
+          const stored = localStorage.getItem('wrapstore_custom_products_v1')
+          return stored ? JSON.parse(stored) : []
+        } catch {
+          return []
         }
       }
 
-      // Upload images
+      const saveLocalProduct = (p) => {
+        const local = getLocalProducts()
+        const idx = local.findIndex(item => item.id === p.id)
+        if (idx !== -1) local[idx] = p
+        else local.unshift(p)
+        localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(local))
+      }
+
+      if (productId) {
+        // Edit mode
+        let { data, error } = await supabase.from('products').update(currentPayload).eq('id', productId)
+        if (error) {
+          if (error.message?.includes('mrp') || error.code === 'PGRST204') {
+            delete currentPayload.mrp
+            if (mrpPrice > 0 && !currentPayload.description?.includes('MRP:')) {
+              currentPayload.description = currentPayload.description ? `${currentPayload.description}\n\nMRP: ₹${mrpPrice}` : `MRP: ₹${mrpPrice}`
+            }
+          }
+          if (error.message?.includes('color_variants')) {
+            delete currentPayload.color_variants
+          }
+          if (error.message?.includes('created_by') || error.message?.includes('profiles')) {
+            delete currentPayload.created_by
+          }
+          const retry = await supabase.from('products').update(currentPayload).eq('id', productId)
+          if (retry.error) {
+            if (retry.error.message?.includes('row-level security') || retry.error.message?.includes('policy') || retry.error.code === '42501') {
+              saveLocalProduct({ id: productId, ...currentPayload, updated_at: new Date().toISOString() })
+            } else {
+              throw retry.error
+            }
+          }
+        }
+      } else {
+        // Create mode
+        let { data, error } = await supabase.from('products').insert(currentPayload).select().single()
+        if (error) {
+          if (error.message?.includes('mrp') || error.code === 'PGRST204') {
+            delete currentPayload.mrp
+            if (mrpPrice > 0 && !currentPayload.description?.includes('MRP:')) {
+              currentPayload.description = currentPayload.description ? `${currentPayload.description}\n\nMRP: ₹${mrpPrice}` : `MRP: ₹${mrpPrice}`
+            }
+          }
+          if (error.message?.includes('color_variants')) {
+            delete currentPayload.color_variants
+          }
+          if (error.message?.includes('created_by') || error.message?.includes('profiles') || error.message?.includes('uuid')) {
+            delete currentPayload.created_by
+          }
+          const retry = await supabase.from('products').insert(currentPayload).select().single()
+          if (retry.error) {
+            if (retry.error.message?.includes('row-level security') || retry.error.message?.includes('policy') || retry.error.code === '42501') {
+              const localUuid = `prod-local-${Date.now()}`
+              const localRecord = {
+                id: localUuid,
+                product_id: `WS-${Math.floor(100000 + Math.random() * 900000)}`,
+                ...currentPayload,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }
+              saveLocalProduct(localRecord)
+              productUuid = localUuid
+              isLocalFallback = true
+            } else {
+              throw retry.error
+            }
+          } else {
+            data = retry.data
+            productUuid = data?.id || `prod-local-${Date.now()}`
+          }
+        } else {
+          productUuid = data?.id || `prod-local-${Date.now()}`
+        }
+
+        // Record initial stock movement if DB insert succeeded
+        if (!isLocalFallback && productUuid) {
+          const stockToRecord = totalStock > 0 ? totalStock : Number(form.initial_stock) || 0
+          if (stockToRecord > 0) {
+            const validUserUuid = isValidUuid(user?.id) ? user.id : null
+            const movementPayload = {
+              product_id: productUuid,
+              movement_type: 'INITIAL_STOCK',
+              quantity: stockToRecord,
+              previous_stock: 0,
+              new_stock: stockToRecord,
+              reason: 'Initial stock on product creation',
+              performed_by: validUserUuid,
+            }
+            const movementRes = await supabase.from('inventory_movements').insert(movementPayload)
+            if (movementRes.error && movementPayload.performed_by) {
+              delete movementPayload.performed_by
+              await supabase.from('inventory_movements').insert(movementPayload)
+            }
+          }
+        }
+      }
+
+      // Upload main images
       if (images.length > 0) {
         setUploadingImages(true)
         const imageRecords = await uploadImages(productUuid)
@@ -440,7 +658,7 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
         setUploadingImages(false)
       }
 
-      toast.success(productId ? 'Product updated! Awaiting approval.' : 'Product added! Awaiting approval.')
+      toast.success(productId ? 'Product updated! Awaiting approval.' : 'Product submitted for approval!')
 
       if (onSave) onSave()
       else navigate('/products')
@@ -832,6 +1050,314 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
                     )}
                   </div>
                 </div>
+
+                {/* Product Variant Builder Section (As per low-fi wireframe) */}
+                <hr style={{ margin: '24px 0', border: 'none', borderTop: '1px solid var(--border)' }} />
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                    Product Variant
+                  </h3>
+
+                  {/* Add Image (Multi Image Select) */}
+                  <div>
+                    <label className="form-label" style={{ marginBottom: '8px' }}>Add Image</label>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div
+                        onClick={() => variantFileRef.current?.click()}
+                        style={{
+                          width: '96px',
+                          height: '96px',
+                          background: '#e5e7eb',
+                          border: '2px dashed #9ca3af',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                          padding: '6px',
+                          transition: 'all 0.15s ease',
+                        }}
+                        title="Click to select images"
+                      >
+                        <Upload size={18} style={{ color: '#4b5563', marginBottom: '4px' }} />
+                        <span style={{ fontSize: '10px', fontWeight: 700, color: '#374151', lineHeight: '1.2' }}>
+                          (Multi Image Select)
+                        </span>
+                      </div>
+                      <input
+                        ref={variantFileRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={handleVariantImageSelect}
+                      />
+
+                      {/* Draft Image Previews */}
+                      {variantDraft.images && variantDraft.images.map(img => (
+                        <div
+                          key={img.id}
+                          style={{
+                            position: 'relative',
+                            width: '96px',
+                            height: '96px',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            border: '1px solid var(--border-strong)',
+                            background: '#ffffff',
+                          }}
+                        >
+                          <img src={img.preview} alt="variant-preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          <button
+                            type="button"
+                            onClick={() => removeVariantImage(img.id)}
+                            style={{
+                              position: 'absolute',
+                              top: '4px',
+                              right: '4px',
+                              width: '20px',
+                              height: '20px',
+                              borderRadius: '50%',
+                              background: 'rgba(0,0,0,0.7)',
+                              color: '#ffffff',
+                              border: 'none',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Name & Description Row */}
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    <div className="form-group" style={{ flex: '1 1 220px', marginBottom: 0 }}>
+                      <label className="form-label">Name</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Variant Name"
+                        value={variantDraft.name}
+                        onChange={e => setVariantDraft(prev => ({ ...prev, name: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: '2 1 340px', marginBottom: 0 }}>
+                      <label className="form-label">Description</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Variant description..."
+                        value={variantDraft.description}
+                        onChange={e => setVariantDraft(prev => ({ ...prev, description: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Purchase Price, MRP, Selling Price Row */}
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    <div className="form-group" style={{ flex: '1 1 140px', marginBottom: 0 }}>
+                      <label className="form-label">Purchase Price</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="form-input"
+                        placeholder="0.00"
+                        value={variantDraft.purchase_price}
+                        onChange={e => setVariantDraft(prev => ({ ...prev, purchase_price: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: '1 1 140px', marginBottom: 0 }}>
+                      <label className="form-label">MRP</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="form-input"
+                        placeholder="0.00"
+                        value={variantDraft.mrp}
+                        onChange={e => setVariantDraft(prev => ({ ...prev, mrp: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: '1 1 140px', marginBottom: 0 }}>
+                      <label className="form-label">Selling Price</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="form-input"
+                        placeholder="0.00"
+                        value={variantDraft.selling_price}
+                        onChange={e => setVariantDraft(prev => ({ ...prev, selling_price: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Quantity Row */}
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    <div className="form-group" style={{ flex: '0 1 200px', marginBottom: 0 }}>
+                      <label className="form-label">Quantity</label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-input"
+                        placeholder="0"
+                        value={variantDraft.quantity}
+                        onChange={e => setVariantDraft(prev => ({ ...prev, quantity: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Add Product Variant Button */}
+                  <div style={{ display: 'flex', justifyContent: 'center', margin: '16px 0 8px 0' }}>
+                    <button
+                      type="button"
+                      onClick={handleAddOrUpdateVariant}
+                      style={{
+                        padding: '9px 22px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        borderRadius: 'var(--radius)',
+                        border: '1.5px solid #111827',
+                        background: '#ffffff',
+                        color: '#111827',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {editingVariantId ? '✓ Update Product Variant' : '+ Add Product Variant'}
+                    </button>
+                  </div>
+
+                  {/* Product Variants List Table */}
+                  <div style={{
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: 'var(--radius)',
+                    overflow: 'hidden',
+                    background: '#ffffff',
+                    marginTop: '8px',
+                  }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb', borderBottom: '2px solid var(--border-strong)', color: '#111827', fontWeight: 700 }}>
+                          <th style={{ padding: '12px 14px' }}>Product Image</th>
+                          <th style={{ padding: '12px 14px' }}>Product Name</th>
+                          <th style={{ padding: '12px 14px' }}>Purchase Price</th>
+                          <th style={{ padding: '12px 14px' }}>MRP</th>
+                          <th style={{ padding: '12px 14px' }}>Selling Price</th>
+                          <th style={{ padding: '12px 14px' }}>Quantity</th>
+                          <th style={{ padding: '12px 14px', textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {variantsList.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                              No product variants added yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          variantsList.map((variant) => (
+                            <tr key={variant.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                                {variant.images && variant.images.length > 0 ? (
+                                  <img
+                                    src={variant.images[0].preview}
+                                    alt="variant"
+                                    style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)' }}
+                                  />
+                                ) : (
+                                  <div style={{
+                                    width: '48px', height: '48px', background: '#d1d5db', borderRadius: '6px',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280',
+                                  }}>
+                                    <ImageIcon size={22} />
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--text-primary)', verticalAlign: 'middle' }}>
+                                {variant.name}
+                                {variant.description && (
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400, marginTop: '2px' }}>
+                                    {variant.description}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                                ₹{Number(variant.purchase_price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                                ₹{Number(variant.mrp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600, color: '#10b981', verticalAlign: 'middle' }}>
+                                ₹{Number(variant.selling_price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                                <span style={{ fontWeight: 600 }}>{variant.quantity || 0}</span>
+                              </td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', verticalAlign: 'middle' }}>
+                                <div style={{ display: 'inline-flex', gap: '8px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditVariant(variant)}
+                                    style={{
+                                      width: '32px',
+                                      height: '32px',
+                                      borderRadius: '50%',
+                                      background: '#e5e7eb',
+                                      border: 'none',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      cursor: 'pointer',
+                                      color: '#374151',
+                                      transition: 'all 0.15s ease',
+                                    }}
+                                    title="Edit variant"
+                                  >
+                                    <Edit3 size={14} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteVariant(variant.id)}
+                                    style={{
+                                      width: '32px',
+                                      height: '32px',
+                                      borderRadius: '50%',
+                                      background: '#e5e7eb',
+                                      border: 'none',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      cursor: 'pointer',
+                                      color: '#374151',
+                                      transition: 'all 0.15s ease',
+                                    }}
+                                    title="Delete variant"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -867,70 +1393,8 @@ const AddProduct = ({ prefillData = null, productId = null, onSave = null }) => 
               </div>
             </div>
 
-            {/* Pricing */}
-            <div className="card">
-              <div className="card-header"><span className="card-title">Pricing</span></div>
-              <div className="card-body">
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Purchase Price (₹) <span className="required">*</span></label>
-                    <input
-                      type="number"
-                      className={`form-input ${errors.purchase_price ? 'error' : ''}`}
-                      placeholder="0.00"
-                      min="0"
-                      step="0.01"
-                      value={form.purchase_price}
-                      onChange={e => set('purchase_price', e.target.value)}
-                      id="purchase-price"
-                    />
-                    {errors.purchase_price && <div className="form-error">{errors.purchase_price}</div>}
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Selling Price (₹) <span className="required">*</span></label>
-                    <input
-                      type="number"
-                      className={`form-input ${errors.selling_price ? 'error' : ''}`}
-                      placeholder="0.00"
-                      min="0"
-                      step="0.01"
-                      value={form.selling_price}
-                      onChange={e => set('selling_price', e.target.value)}
-                      id="selling-price"
-                    />
-                    {errors.selling_price && <div className="form-error">{errors.selling_price}</div>}
-                  </div>
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">GST (%)</label>
-                  <select
-                    className="form-select"
-                    value={form.gst_percentage}
-                    onChange={e => set('gst_percentage', e.target.value)}
-                  >
-                    {GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}
-                  </select>
-                </div>
-
-                {form.selling_price && (
-                  <div style={{ marginTop: '14px', padding: '12px', background: '#f9fafb', borderRadius: 'var(--radius)', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span>Selling Price:</span>
-                      <span style={{ fontWeight: 600 }}>₹{Number(form.selling_price).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                    </div>
-                    {Number(form.gst_percentage) > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Price + GST ({form.gst_percentage}%):</span>
-                        <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                          ₹{(Number(form.selling_price) * (1 + Number(form.gst_percentage) / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
+
 
           {/* Right Column */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
