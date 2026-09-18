@@ -11,14 +11,16 @@ export const useAuth = () => {
   return context
 }
 
+const DEFAULT_ADMIN_UUID = '00000000-0000-0000-0000-000000000001'
+
 const DEFAULT_ADMIN_USER = {
-  id: 'default-admin-001',
+  id: DEFAULT_ADMIN_UUID,
   email: 'admin@wrapstore.in',
   role: 'authenticated',
 }
 
 const DEFAULT_ADMIN_PROFILE = {
-  id: 'default-admin-001',
+  id: DEFAULT_ADMIN_UUID,
   email: 'admin@wrapstore.in',
   full_name: 'WrapStore Admin',
   role: 'super_admin',

@@ -12,6 +12,7 @@ import { sendWhatsAppInvoice, retryWhatsAppDelivery } from '../services/whatsapp
 import ProductImageHover from '../components/common/ProductImageHover'
 
 // ---- Helpers ----
+const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
 const INR = (v) => '₹' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const PAYMENT_METHODS = [
@@ -594,7 +595,7 @@ const Billing = () => {
           payment_method: paymentMethod,
           payment_status: 'PAID',
           notes: notes.trim() || null,
-          created_by: user?.id,
+          created_by: isValidUuid(user?.id) ? user.id : null,
         })
         .select()
         .single()
@@ -672,7 +673,7 @@ const Billing = () => {
           new_stock: newStock,
           reason: `Sale — Invoice ${invoice.invoice_number}`,
           reference_id: invoice.id,
-          performed_by: user?.id,
+          performed_by: isValidUuid(user?.id) ? user.id : null,
         })
       }
 

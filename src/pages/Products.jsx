@@ -56,6 +56,15 @@ const Products = () => {
   const navigate = useNavigate()
   const { isSuperAdmin } = useAuth()
 
+  const getLocalProducts = () => {
+    try {
+      const stored = localStorage.getItem('wrapstore_custom_products_v1')
+      return stored ? JSON.parse(stored) : []
+    } catch {
+      return []
+    }
+  }
+
   const fetchProducts = async () => {
     setLoading(true)
     let query = supabase
@@ -81,8 +90,18 @@ const Products = () => {
       .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1)
 
     const { data, count, error } = await query
-    if (error) toast.error('Failed to load products')
-    else { setProducts(data || []); setTotal(count || 0) }
+    const dbProds = data || []
+    const localProds = getLocalProducts().filter(p => p.is_active !== false)
+
+    const merged = [...dbProds]
+    for (const lp of localProds) {
+      if (!merged.some(p => p.id === lp.id || p.name.toLowerCase() === lp.name.toLowerCase())) {
+        merged.unshift(lp)
+      }
+    }
+
+    setProducts(merged)
+    setTotal((count || 0) + localProds.filter(lp => !dbProds.some(p => p.id === lp.id)).length)
     setLoading(false)
   }
 

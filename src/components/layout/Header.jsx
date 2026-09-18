@@ -1,6 +1,6 @@
 import React from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Plus, Store, Sparkles } from 'lucide-react'
+import { Plus, Store, Sparkles, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 
 const PAGE_META = {
@@ -19,7 +19,7 @@ const PAGE_META = {
   '/settings':           { title: 'Settings',             subtitle: 'Configure store profile, GSTIN, and receipt branding' },
 }
 
-const Header = () => {
+const Header = ({ isCollapsed = false, toggleSidebar }) => {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { profile } = useAuth()
@@ -38,9 +38,35 @@ const Header = () => {
 
   return (
     <header className="header">
-      <div className="header-title">
-        <h1>{meta.title}</h1>
-        {meta.subtitle && <p className="header-subtitle">{meta.subtitle}</p>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {toggleSidebar && (
+          <button
+            type="button"
+            className="sidebar-toggle-btn"
+            onClick={toggleSidebar}
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '8px',
+              background: '#ffffff',
+              border: '1px solid var(--border-strong)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: '#374151',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {isCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
+        )}
+        <div className="header-title">
+          <h1>{meta.title}</h1>
+          {meta.subtitle && <p className="header-subtitle">{meta.subtitle}</p>}
+        </div>
       </div>
 
       <div className="header-actions">

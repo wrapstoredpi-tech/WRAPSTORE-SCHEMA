@@ -19,6 +19,7 @@ const CHANNELS = [
 ]
 
 const LOCAL_STORAGE_KEY = 'wrapstore_online_sales_local_v1'
+const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
 
 const OnlineSales = () => {
   const { user } = useAuth()
@@ -222,7 +223,7 @@ const OnlineSales = () => {
               previous_stock: selectedProd.current_stock,
               new_stock: updatedStock,
               notes: `Online Sale Edit (${formData.channel})`,
-              performed_by: user?.id || null,
+              performed_by: isValidUuid(user?.id) ? user.id : null,
             })
           }
         } else {
@@ -244,7 +245,7 @@ const OnlineSales = () => {
             previous_stock: selectedProd.current_stock,
             new_stock: newStock,
             notes: `Online Sale Item Swapped (${formData.channel})`,
-            performed_by: user?.id || null,
+            performed_by: isValidUuid(user?.id) ? user.id : null,
           })
         }
 
@@ -291,7 +292,7 @@ const OnlineSales = () => {
           previous_stock: selectedProd.current_stock,
           new_stock: newStock,
           notes: `Online Sale (${formData.channel}) - ${formData.customerName || 'Direct'}`,
-          performed_by: user?.id || null,
+          performed_by: isValidUuid(user?.id) ? user.id : null,
         })
 
         // 3. Insert Online Sale Record
@@ -355,7 +356,7 @@ const OnlineSales = () => {
           previous_stock: saleProd.current_stock,
           new_stock: restoredStock,
           notes: `Cancelled Online Sale (${deletingSale.channel})`,
-          performed_by: user?.id || null,
+          performed_by: isValidUuid(user?.id) ? user.id : null,
         })
       }
 

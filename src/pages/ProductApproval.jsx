@@ -22,6 +22,8 @@ const formatProductType = (p) => {
   return type.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
 
+const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
+
 const ProductApproval = () => {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -30,6 +32,15 @@ const ProductApproval = () => {
   const [rejectionReason, setRejectionReason] = useState('')
   const [processing, setProcessing] = useState(null)
   const { user } = useAuth()
+
+  const getLocalProducts = () => {
+    try {
+      const stored = localStorage.getItem('wrapstore_custom_products_v1')
+      return stored ? JSON.parse(stored) : []
+    } catch {
+      return []
+    }
+  }
 
   const fetchPending = async () => {
     setLoading(true)
@@ -46,8 +57,17 @@ const ProductApproval = () => {
       .eq('is_active', true)
       .order('created_at', { ascending: false })
 
-    if (error) toast.error('Failed to load pending products')
-    else setProducts(data || [])
+    const dbProds = data || []
+    const localPending = getLocalProducts().filter(p => p.approval_status === 'PENDING_APPROVAL' && p.is_active !== false)
+
+    const merged = [...dbProds]
+    for (const lp of localPending) {
+      if (!merged.some(p => p.id === lp.id)) {
+        merged.unshift(lp)
+      }
+    }
+
+    setProducts(merged)
     setLoading(false)
   }
 
@@ -55,9 +75,10 @@ const ProductApproval = () => {
 
   const handleApprove = async (productId) => {
     setProcessing(productId)
+    const validUserUuid = isValidUuid(user?.id) ? user.id : null
     const { error } = await supabase.from('products').update({
       approval_status: 'APPROVED',
-      approved_by: user?.id,
+      approved_by: validUserUuid,
       approved_at: new Date().toISOString(),
       rejection_reason: null,
     }).eq('id', productId)
@@ -76,10 +97,11 @@ const ProductApproval = () => {
       return
     }
     setProcessing(rejectModal)
+    const validUserUuid = isValidUuid(user?.id) ? user.id : null
     const { error } = await supabase.from('products').update({
       approval_status: 'REJECTED',
       rejection_reason: rejectionReason.trim(),
-      approved_by: user?.id,
+      approved_by: validUserUuid,
       approved_at: new Date().toISOString(),
     }).eq('id', rejectModal)
 

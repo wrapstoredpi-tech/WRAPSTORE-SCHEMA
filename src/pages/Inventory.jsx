@@ -98,6 +98,9 @@ const StockModal = ({ product, onClose, onSaved }) => {
         ? newStock - product.current_stock  // record the delta
         : (isAddition ? Number(quantity) : -Number(quantity))
 
+      const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
+      const validUserUuid = isValidUuid(user?.id) ? user.id : null
+
       const { error: movErr } = await supabase.from('inventory_movements').insert({
         product_id: product.id,
         movement_type: movementType,
@@ -105,7 +108,7 @@ const StockModal = ({ product, onClose, onSaved }) => {
         previous_stock: product.current_stock,
         new_stock: newStock,
         reason: reason.trim() || null,
-        performed_by: user?.id,
+        performed_by: validUserUuid,
       })
 
       if (movErr) throw movErr
