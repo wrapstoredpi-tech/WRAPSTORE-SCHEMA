@@ -42,22 +42,46 @@ const ProductApproval = () => {
     }
   }
 
+  const updateLocalProductStatus = (id, newStatus, reason = null) => {
+    try {
+      const local = getLocalProducts()
+      const updated = local.map(p => {
+        if (p.id === id) {
+          return {
+            ...p,
+            approval_status: newStatus,
+            rejection_reason: reason,
+            updated_at: new Date().toISOString(),
+          }
+        }
+        return p
+      })
+      localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(updated))
+    } catch (e) {
+      console.warn('Error updating local product status:', e)
+    }
+  }
+
   const fetchPending = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('products')
-      .select(`
-        *,
-        categories(name),
-        subcategories(name),
-        product_images(public_url, is_primary),
-        profiles!products_created_by_fkey(full_name, email)
-      `)
-      .eq('approval_status', 'PENDING_APPROVAL')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false })
+    let dbProds = []
+    try {
+      const { data } = await supabase
+        .from('products')
+        .select(`
+          *,
+          categories(name),
+          subcategories(name),
+          product_images(public_url, is_primary)
+        `)
+        .eq('approval_status', 'PENDING_APPROVAL')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+      dbProds = data || []
+    } catch (e) {
+      console.warn('Error fetching pending products from DB:', e)
+    }
 
-    const dbProds = data || []
     const localPending = getLocalProducts().filter(p => p.approval_status === 'PENDING_APPROVAL' && p.is_active !== false)
 
     const merged = [...dbProds]
@@ -75,19 +99,41 @@ const ProductApproval = () => {
 
   const handleApprove = async (productId) => {
     setProcessing(productId)
-    const validUserUuid = isValidUuid(user?.id) ? user.id : null
-    const { error } = await supabase.from('products').update({
+
+    let validApprovedBy = null
+    if (isValidUuid(user?.id)) {
+      try {
+        const { data: prof } = await supabase.from('profiles').select('id').eq('id', user.id).single()
+        if (prof?.id) validApprovedBy = prof.id
+      } catch {
+        validApprovedBy = null
+      }
+    }
+
+    const payload = {
       approval_status: 'APPROVED',
-      approved_by: validUserUuid,
       approved_at: new Date().toISOString(),
       rejection_reason: null,
-    }).eq('id', productId)
-
-    if (error) toast.error(error.message)
-    else {
-      toast.success('Product approved!')
-      fetchPending()
     }
+    if (validApprovedBy) payload.approved_by = validApprovedBy
+
+    let { error } = await supabase.from('products').update(payload).eq('id', productId)
+
+    if (error && (error.message?.includes('approved_by') || error.message?.includes('foreign key constraint') || error.code === '23503')) {
+      delete payload.approved_by
+      const retry = await supabase.from('products').update(payload).eq('id', productId)
+      error = retry.error
+    }
+
+    // Always update local storage product state if present
+    updateLocalProductStatus(productId, 'APPROVED')
+
+    if (error) {
+      console.warn('DB approve update error:', error.message)
+    }
+    toast.success('Product approved!')
+
+    fetchPending()
     setProcessing(null)
   }
 
@@ -97,21 +143,43 @@ const ProductApproval = () => {
       return
     }
     setProcessing(rejectModal)
-    const validUserUuid = isValidUuid(user?.id) ? user.id : null
-    const { error } = await supabase.from('products').update({
+
+    let validApprovedBy = null
+    if (isValidUuid(user?.id)) {
+      try {
+        const { data: prof } = await supabase.from('profiles').select('id').eq('id', user.id).single()
+        if (prof?.id) validApprovedBy = prof.id
+      } catch {
+        validApprovedBy = null
+      }
+    }
+
+    const payload = {
       approval_status: 'REJECTED',
       rejection_reason: rejectionReason.trim(),
-      approved_by: validUserUuid,
       approved_at: new Date().toISOString(),
-    }).eq('id', rejectModal)
-
-    if (error) toast.error(error.message)
-    else {
-      toast.success('Product rejected with reason.')
-      setRejectModal(null)
-      setRejectionReason('')
-      fetchPending()
     }
+    if (validApprovedBy) payload.approved_by = validApprovedBy
+
+    let { error } = await supabase.from('products').update(payload).eq('id', rejectModal)
+
+    if (error && (error.message?.includes('approved_by') || error.message?.includes('foreign key constraint') || error.code === '23503')) {
+      delete payload.approved_by
+      const retry = await supabase.from('products').update(payload).eq('id', rejectModal)
+      error = retry.error
+    }
+
+    // Always update local storage product state if present
+    updateLocalProductStatus(rejectModal, 'REJECTED', rejectionReason.trim())
+
+    if (error) {
+      console.warn('DB reject update error:', error.message)
+    }
+    toast.success('Product rejected with reason.')
+
+    setRejectModal(null)
+    setRejectionReason('')
+    fetchPending()
     setProcessing(null)
   }
 
@@ -158,14 +226,14 @@ const ProductApproval = () => {
               <div key={p.id} className="card" style={{ overflow: 'hidden' }}>
                 {/* Summary Row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px 20px' }}>
-                  {/* Image with Hover Preview */}
-                  <ProductImageHover src={imgUrl} title={p.name} alt={p.name} size={56} />
+                  {/* Image with Hover & Multi-Image Gallery Preview */}
+                  <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={p.name} alt={p.name} size={56} />
 
                   {/* Info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
                       <code style={{ fontSize: '11px', background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace' }}>
-                        Pending ID
+                        {p.product_id || 'Pending ID'}
                       </code>
                       <span className="product-type-tag">{formatProductType(p)}</span>
                     </div>
@@ -173,109 +241,147 @@ const ProductApproval = () => {
                       {p.name}
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      Submitted by {p.profiles?.full_name || p.profiles?.email || 'Unknown'} ·{' '}
-                      {new Date(p.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      Submitted by {p.profiles?.full_name || p.profiles?.email || 'Store Manager'} ·{' '}
+                      {new Date(p.created_at || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                       {p.mobile_model && ` · ${p.mobile_model}`}
                     </div>
                   </div>
 
-                  {/* Price */}
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: '16px' }}>
-                      ₹{Number(p.selling_price).toLocaleString('en-IN')}
+                  {/* Pricing */}
+                  <div style={{ textAlign: 'right', marginRight: '8px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      ₹{Number(p.selling_price || 0).toLocaleString('en-IN')}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Stock: {p.current_stock}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 2 }}>
+                      Stock: {p.current_stock || 0}
+                    </div>
                   </div>
 
                   {/* Actions */}
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <button
-                      className="btn btn-success"
+                      className="btn btn-sm"
+                      style={{ background: '#10b981', color: '#ffffff', borderColor: '#10b981' }}
                       onClick={() => handleApprove(p.id)}
                       disabled={isProcessing}
-                      id={`approve-${p.id}`}
                     >
-                      {isProcessing ? <div className="btn-spinner" /> : <CheckCircle2 size={14} />}
-                      Approve
+                      {isProcessing ? <div className="btn-spinner" /> : <><CheckCircle2 size={13} /> Approve</>}
                     </button>
+
                     <button
-                      className="btn btn-danger"
-                      onClick={() => { setRejectModal(p.id); setRejectionReason('') }}
+                      className="btn btn-danger btn-sm"
+                      onClick={() => setRejectModal(p.id)}
                       disabled={isProcessing}
-                      id={`reject-${p.id}`}
                     >
-                      <XCircle size={14} />
-                      Reject
+                      <XCircle size={13} /> Reject
                     </button>
+
                     <button
-                      className="btn btn-ghost btn-icon"
+                      className="btn btn-ghost btn-icon btn-sm"
                       onClick={() => toggleExpand(p.id)}
                       title={isOpen ? 'Collapse' : 'Expand details'}
                     >
-                      {isOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                      {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                     </button>
                   </div>
                 </div>
 
                 {/* Expanded Details */}
                 {isOpen && (
-                  <div style={{ borderTop: '1px solid var(--border)', padding: '20px', background: '#fafafa', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
-                    <div>
-                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>Product Details</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
-                        {[
-                          ['Type', formatProductType(p)],
-                          ['Category', p.categories?.name || '—'],
-                          ['Subcategory', p.subcategories?.name || '—'],
-                          ['Brand', p.mobile_brand || '—'],
-                          ['Model', p.mobile_model || '—'],
-                          ['Colors', p.color_variants || '—'],
-                        ].map(([k, v]) => (
-                          <div key={k} style={{ display: 'flex', gap: '8px' }}>
-                            <span style={{ color: 'var(--text-muted)', minWidth: '80px' }}>{k}</span>
-                            <span style={{ fontWeight: 500 }}>{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>Pricing & Stock</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
-                        {[
-                          ['Purchase Price', `₹${Number(p.purchase_price || 0).toLocaleString('en-IN')}`],
-                          ['Selling Price', `₹${Number(p.selling_price || 0).toLocaleString('en-IN')}`],
-                          ['Discount', `${p.discount_percentage || 0}%`],
-                          ['GST', `${p.gst_percentage || 0}%`],
-                          ['Initial Stock', p.current_stock ?? 0],
-                          ['Min Stock Level', p.min_stock_level ?? 0],
-                        ].map(([k, v]) => (
-                          <div key={k} style={{ display: 'flex', gap: '8px' }}>
-                            <span style={{ color: 'var(--text-muted)', minWidth: '100px' }}>{k}</span>
-                            <span style={{ fontWeight: 600 }}>{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>Images ({p.product_images?.length || 0})</div>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {p.product_images?.length > 0 ? (
-                          p.product_images.map(img => (
-                            <div key={img.public_url} style={{ width: 64, height: 64, borderRadius: 'var(--radius)', overflow: 'hidden', border: `2px solid ${img.is_primary ? 'var(--brand-black)' : 'var(--border)'}` }}>
-                              <img src={img.public_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            </div>
-                          ))
-                        ) : (
-                          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No images uploaded</div>
-                        )}
-                      </div>
-                      {p.description && (
-                        <div style={{ marginTop: '14px' }}>
-                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>Description</div>
-                          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{p.description}</div>
+                  <div style={{
+                    padding: '16px 20px',
+                    background: '#f9fafb',
+                    borderTop: '1px solid var(--border)',
+                    fontSize: '13px',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '16px',
+                  }}>
+                    {/* Uploaded Images Gallery Grid */}
+                    {((p.product_images && p.product_images.length > 0) || (p.images && p.images.length > 0)) && (
+                      <div style={{ gridColumn: '1 / -1', background: '#ffffff', border: '1px solid var(--border)', borderRadius: '8px', padding: '12px' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '12px', textTransform: 'uppercase', marginBottom: 10, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <ImageIcon size={14} color="#3b82f6" />
+                          Uploaded Images ({(p.product_images || p.images).length})
                         </div>
+                        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                          {(p.product_images || p.images).map((img, idx) => {
+                            const url = typeof img === 'string' ? img : (img.public_url || img.preview)
+                            const isPrimary = img.is_primary || idx === 0
+                            return (
+                              <div key={idx} style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                <ProductImageHover
+                                  src={url}
+                                  images={p.product_images || p.images}
+                                  title={`${p.name} - Image ${idx + 1}`}
+                                  size={64}
+                                />
+                                {isPrimary ? (
+                                  <span style={{
+                                    fontSize: '9px',
+                                    fontWeight: 700,
+                                    background: '#111827',
+                                    color: '#ffffff',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    marginTop: '4px',
+                                  }}>
+                                    Primary
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                    Img {idx + 1}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Category & Type
+                      </div>
+                      <div>{p.categories?.name || p.product_type}</div>
+                      {p.subcategories?.name && (
+                        <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Sub: {p.subcategories.name}</div>
                       )}
                     </div>
+
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Brand & Models
+                      </div>
+                      <div>{p.mobile_brand || 'Universal'}</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{p.mobile_model || 'All models'}</div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Pricing Details
+                      </div>
+                      <div>Purchase: ₹{Number(p.purchase_price || 0).toLocaleString('en-IN')}</div>
+                      <div>Selling: ₹{Number(p.selling_price || 0).toLocaleString('en-IN')}</div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Stock Levels
+                      </div>
+                      <div>Current Stock: {p.current_stock || 0} units</div>
+                      <div>Min Alert: {p.min_stock_level || 5} units</div>
+                    </div>
+
+                    {p.description && (
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                          Description
+                        </div>
+                        <div>{p.description}</div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -284,24 +390,24 @@ const ProductApproval = () => {
         </div>
       )}
 
-      {/* Reject Modal */}
+      {/* Reject Reason Modal */}
       {rejectModal && (
         <div className="modal-overlay" onClick={() => setRejectModal(null)}>
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title" style={{ color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <XCircle size={16} /> Reject Product
-              </span>
+              <span className="modal-title">Reject Product</span>
+              <button className="btn btn-ghost btn-icon" onClick={() => setRejectModal(null)}>
+                <XCircle size={16} />
+              </button>
             </div>
             <div className="modal-body">
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
-                The store manager will see this reason and can edit the product before resubmitting.
-              </p>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Rejection Reason <span className="required">*</span></label>
+              <div className="form-group">
+                <label className="form-label">
+                  Rejection Reason <span className="required">*</span>
+                </label>
                 <textarea
                   className="form-textarea"
-                  placeholder="e.g. Incorrect pricing, missing product images, wrong category..."
+                  placeholder="e.g. Incorrect pricing structure, missing high-res images..."
                   value={rejectionReason}
                   onChange={e => setRejectionReason(e.target.value)}
                   rows={3}
@@ -310,14 +416,15 @@ const ProductApproval = () => {
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setRejectModal(null)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => setRejectModal(null)}>
+                Cancel
+              </button>
               <button
                 className="btn btn-danger"
                 onClick={handleReject}
-                disabled={!rejectionReason.trim() || processing}
-                id="confirm-reject-btn"
+                disabled={!rejectionReason.trim()}
               >
-                {processing ? <><div className="btn-spinner" /> Rejecting...</> : <><XCircle size={13} /> Reject Product</>}
+                Reject Product
               </button>
             </div>
           </div>

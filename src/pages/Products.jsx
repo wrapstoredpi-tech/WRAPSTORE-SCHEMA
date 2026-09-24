@@ -115,26 +115,65 @@ const Products = () => {
 
   const handleDelete = async () => {
     setDeleting(true)
-    const { error } = await supabase.from('products').delete().eq('id', deleteId)
-    if (error) {
-      if (error.code === '23503') {
-        const { error: softErr } = await supabase.from('products').update({ is_active: false }).eq('id', deleteId)
-        if (softErr) {
-          toast.error(softErr.message)
+    try {
+      // 1. Fetch storage_path for all images of the target product
+      const { data: imgRows, error: fetchErr } = await supabase
+        .from('product_images')
+        .select('storage_path')
+        .eq('product_id', deleteId)
+
+      if (fetchErr) {
+        console.error('Failed to fetch product image storage paths before deletion:', fetchErr)
+        toast.error(`Failed to prepare product deletion: ${fetchErr.message}`)
+        setDeleting(false)
+        return
+      }
+
+      const storagePaths = (imgRows || []).map(r => r.storage_path).filter(Boolean)
+
+      // 2. Delete physical files using Supabase Storage API
+      if (storagePaths.length > 0) {
+        const { data: removeData, error: removeErr } = await supabase
+          .storage
+          .from('product-images')
+          .remove(storagePaths)
+
+        if (removeErr) {
+          console.error('Storage deletion failed for paths:', storagePaths, removeErr)
+          toast.error(`Storage image deletion failed: ${removeErr.message}. Aborting product deletion.`)
+          setDeleting(false)
+          return
+        }
+
+        console.log('Successfully removed storage objects:', removeData)
+      }
+
+      // 3. Only after successful Storage deletion, delete the product record from database
+      const { error: dbErr } = await supabase.from('products').delete().eq('id', deleteId)
+      if (dbErr) {
+        if (dbErr.code === '23503') {
+          const { error: softErr } = await supabase.from('products').update({ is_active: false }).eq('id', deleteId)
+          if (softErr) {
+            toast.error(softErr.message)
+          } else {
+            toast.success('Product is linked to sales records, so it was archived.')
+            setDeleteId(null)
+            fetchProducts()
+          }
         } else {
-          toast.success('Product is linked to sales records, so it was archived.')
-          setDeleteId(null)
-          fetchProducts()
+          toast.error(dbErr.message)
         }
       } else {
-        toast.error(error.message)
+        toast.success('Product and associated images deleted successfully.')
+        setDeleteId(null)
+        fetchProducts()
       }
-    } else {
-      toast.success('Product deleted from database.')
-      setDeleteId(null)
-      fetchProducts()
+    } catch (err) {
+      console.error('Unexpected error during product deletion:', err)
+      toast.error('An unexpected error occurred while deleting the product.')
+    } finally {
+      setDeleting(false)
     }
-    setDeleting(false)
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
@@ -244,7 +283,7 @@ const Products = () => {
                     return (
                       <tr key={p.id}>
                         <td>
-                          <ProductImageHover src={imgUrl} title={p.name} alt={p.name} size={40} />
+                          <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={p.name} alt={p.name} size={40} />
                         </td>
                         <td>
                           <code style={{ fontSize: '11px', background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
