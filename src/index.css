@@ -385,6 +385,7 @@ ul, ol { list-style: none; }
   border-bottom: 1px solid var(--header-border);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 28px;
   position: sticky;
   top: 0;
@@ -414,6 +415,7 @@ ul, ol { list-style: none; }
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* ---- CUSTOM SMOOTH SCROLLBAR ---- */

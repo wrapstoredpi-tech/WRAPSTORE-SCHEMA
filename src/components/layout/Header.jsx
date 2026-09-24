@@ -38,7 +38,7 @@ const Header = ({ isCollapsed = false, toggleSidebar }) => {
 
   return (
     <header className="header">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
         {toggleSidebar && (
           <button
             type="button"
