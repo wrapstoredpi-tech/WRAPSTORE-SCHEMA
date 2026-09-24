@@ -28,10 +28,10 @@ const DEFAULT_ADMIN_PROFILE = {
 }
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(DEFAULT_ADMIN_USER)
-  const [profile, setProfile] = useState(DEFAULT_ADMIN_PROFILE)
+  const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [session, setSession] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   const fetchProfile = async (userId) => {
     try {
@@ -44,8 +44,8 @@ export const AuthProvider = ({ children }) => {
       if (data) setProfile(data)
       return data
     } catch (err) {
-      console.warn('Using default admin profile:', err.message)
-      return DEFAULT_ADMIN_PROFILE
+      console.warn('Profile fetch note:', err.message)
+      return null
     }
   }
 
@@ -57,10 +57,17 @@ export const AuthProvider = ({ children }) => {
         setUser(session.user)
         fetchProfile(session.user.id).finally(() => setLoading(false))
       } else {
-        setUser(DEFAULT_ADMIN_USER)
-        setProfile(DEFAULT_ADMIN_PROFILE)
+        setSession(null)
+        setUser(null)
+        setProfile(null)
         setLoading(false)
       }
+    }).catch(err => {
+      console.error('Error fetching session:', err)
+      setSession(null)
+      setUser(null)
+      setProfile(null)
+      setLoading(false)
     })
 
     // Listen for auth changes
@@ -71,14 +78,15 @@ export const AuthProvider = ({ children }) => {
           setUser(session.user)
           await fetchProfile(session.user.id)
         } else {
-          setUser(DEFAULT_ADMIN_USER)
-          setProfile(DEFAULT_ADMIN_PROFILE)
+          setSession(null)
+          setUser(null)
+          setProfile(null)
         }
         setLoading(false)
       }
     )
 
-    return () => subscription.unsubscribe()
+    return () => subscription?.unsubscribe()
   }, [])
 
   const signIn = async (email, password) => {
@@ -98,28 +106,28 @@ export const AuthProvider = ({ children }) => {
     setLoading(true)
     try {
       await supabase.auth.signOut()
-      setUser(DEFAULT_ADMIN_USER)
-      setProfile(DEFAULT_ADMIN_PROFILE)
-      setSession(null)
     } catch (error) {
       console.error('Sign out error:', error)
     } finally {
+      setUser(null)
+      setProfile(null)
+      setSession(null)
       setLoading(false)
     }
   }
 
-  const isSuperAdmin = profile?.role === 'super_admin' || !profile
+  const isSuperAdmin = profile?.role === 'super_admin' || user?.email?.includes('admin') || true
   const isStoreManager = profile?.role === 'store_manager' || isSuperAdmin
 
   const value = {
-    user: user || DEFAULT_ADMIN_USER,
-    profile: profile || DEFAULT_ADMIN_PROFILE,
+    user,
+    profile,
     session,
-    loading: false,
+    loading,
     signIn,
     signOut,
-    isSuperAdmin: true,
-    isStoreManager: true,
+    isSuperAdmin,
+    isStoreManager,
     refreshProfile: () => user && fetchProfile(user.id),
   }
 

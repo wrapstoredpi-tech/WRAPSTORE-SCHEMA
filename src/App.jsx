@@ -22,13 +22,56 @@ import Reports from './pages/Reports'
 import OnlineOrders from './pages/OnlineOrders'
 import OnlineSales from './pages/OnlineSales'
 
-const ProtectedRoute = ({ children }) => {
+const ProtectedRoute = ({ children, requireSuperAdmin = false }) => {
+  const { user, loading, isSuperAdmin } = useAuth()
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--bg-app)' }}>
+        <div className="spinner" />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />
+  }
+
+  if (requireSuperAdmin && !isSuperAdmin) {
+    return <Navigate to="/dashboard" replace />
+  }
+
+  return children
+}
+
+const PublicOnlyRoute = ({ children }) => {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--bg-app)' }}>
+        <div className="spinner" />
+      </div>
+    )
+  }
+
+  if (user) {
+    return <Navigate to="/dashboard" replace />
+  }
+
   return children
 }
 
 const AppRoutes = () => (
   <Routes>
-    <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+    <Route
+      path="/login"
+      element={
+        <PublicOnlyRoute>
+          <Login />
+        </PublicOnlyRoute>
+      }
+    />
 
     <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
       <Route index element={<Navigate to="/dashboard" replace />} />
