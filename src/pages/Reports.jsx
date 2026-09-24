@@ -130,11 +130,34 @@ const Reports = () => {
     return { totalSales, totalTaxable, totalGst, totalDiscount, count }
   }, [filteredInvoices])
 
+  // Channel breakdown — uses invoices.channel (migration_channel_tracking.sql)
+  // Falls back to 'offline' if the column doesn't exist yet
+  const CHANNEL_META = {
+    offline:   { label: 'Offline (POS)', color: '#111827', bg: '#f3f4f6' },
+    website:   { label: 'Website',       color: '#2563eb', bg: '#eff6ff' },
+    amazon:    { label: 'Amazon',         color: '#f59e0b', bg: '#fffbeb' },
+    flipkart:  { label: 'Flipkart',       color: '#3b82f6', bg: '#eff6ff' },
+    instagram: { label: 'Instagram',      color: '#ec4899', bg: '#fdf2f8' },
+    whatsapp:  { label: 'WhatsApp',       color: '#16a34a', bg: '#dcfce7' },
+    other:     { label: 'Other',          color: '#6b7280', bg: '#f9fafb' },
+  }
+  const channelBreakdown = useMemo(() => {
+    const map = {}
+    filteredInvoices.forEach(inv => {
+      const ch = inv.channel || 'offline'
+      if (!map[ch]) map[ch] = { channel: ch, revenue: 0, count: 0, ...(CHANNEL_META[ch] || {}) }
+      map[ch].revenue += Number(inv.grand_total || 0)
+      map[ch].count += 1
+    })
+    return Object.values(map).sort((a, b) => b.revenue - a.revenue)
+  }, [filteredInvoices])
+
   const handleExportSalesCSV = () => {
-    const headers = ['Invoice #', 'Date', 'Customer Name', 'Customer Phone', 'Payment Method', 'Subtotal (₹)', 'Discount (₹)', 'GST (₹)', 'Grand Total (₹)', 'WhatsApp Status']
+    const headers = ['Invoice #', 'Date', 'Channel', 'Customer Name', 'Customer Phone', 'Payment Method', 'Subtotal (₹)', 'Discount (₹)', 'GST (₹)', 'Grand Total (₹)', 'WhatsApp Status']
     const rows = filteredInvoices.map(i => [
       i.invoice_number,
       i.created_at ? new Date(i.created_at).toLocaleDateString('en-IN') : '',
+      i.channel || 'offline',
       i.customer_name,
       i.customer_phone,
       i.payment_method,
@@ -407,6 +430,43 @@ const Reports = () => {
                 </div>
               </div>
 
+              {/* Channel Revenue Breakdown */}
+              {channelBreakdown.length > 0 && (
+                <div className="card" style={{ marginBottom: 20 }}>
+                  <div className="card-header">
+                    <span className="card-title">Revenue by Channel</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Breakdown of selected period — totals above are the combined sum</span>
+                  </div>
+                  <div className="card-body">
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
+                      {channelBreakdown.map(ch => (
+                        <div key={ch.channel} style={{
+                          background: ch.bg || '#f9fafb',
+                          borderRadius: 'var(--radius)',
+                          padding: '12px 14px',
+                          border: `1px solid ${ch.color || '#e5e7eb'}22`,
+                        }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: ch.color || '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                            {ch.label || ch.channel}
+                          </div>
+                          <div style={{ fontSize: 16, fontWeight: 800 }}>{INR(ch.revenue)}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ch.count} invoice{ch.count !== 1 ? 's' : ''}</div>
+                          <div style={{ marginTop: 6, height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
+                            <div style={{
+                              width: `${salesSummary.totalSales > 0 ? Math.round((ch.revenue / salesSummary.totalSales) * 100) : 0}%`,
+                              height: '100%', background: ch.color || '#374151', borderRadius: 2,
+                            }} />
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                            {salesSummary.totalSales > 0 ? Math.round((ch.revenue / salesSummary.totalSales) * 100) : 0}% of total
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Invoices List */}
               <div className="card" style={{ padding: 0 }}>
                 <div className="card-header" style={{ padding: '16px 20px' }}>
@@ -418,6 +478,7 @@ const Reports = () => {
                       <tr>
                         <th>Invoice #</th>
                         <th>Date</th>
+                        <th>Channel</th>
                         <th>Customer</th>
                         <th>Phone</th>
                         <th>Payment</th>
@@ -431,6 +492,17 @@ const Reports = () => {
                         <tr key={inv.id}>
                           <td><code style={{ fontSize: 11, background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>{inv.invoice_number}</code></td>
                           <td style={{ fontSize: 12 }}>{new Date(inv.created_at).toLocaleDateString('en-IN')}</td>
+                          <td>
+                            {(() => {
+                              const ch = inv.channel || 'offline'
+                              const m = CHANNEL_META[ch] || { label: ch, color: '#6b7280', bg: '#f9fafb' }
+                              return (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: m.color, background: m.bg, padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                  {m.label}
+                                </span>
+                              )
+                            })()}
+                          </td>
                           <td style={{ fontWeight: 600 }}>{inv.customer_name}</td>
                           <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{inv.customer_phone}</td>
                           <td><span className="badge badge-secondary">{inv.payment_method}</span></td>

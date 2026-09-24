@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Search, Plus, Minus, Trash2, User, Phone, CreditCard,
   Banknote, Smartphone, ShoppingBag, CheckCircle2, AlertCircle,
-  FileText, X, Image as ImageIcon, ChevronDown, RefreshCw, MessageCircle
+  FileText, X, Image as ImageIcon, ChevronDown, RefreshCw, MessageCircle,
+  Wifi, WifiOff
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
@@ -472,10 +473,74 @@ const Billing = () => {
   const [stockErrors, setStockErrors] = useState([])
   const [successData, setSuccessData] = useState(null)
   const [store, setStore] = useState(null)
+  const cartRef = useRef(cart)
+
+  // Keep ref in sync so the realtime callback always sees the latest cart
+  useEffect(() => { cartRef.current = cart }, [cart])
 
   useEffect(() => {
     supabase.from('store_settings').select('*').limit(1).single()
       .then(({ data }) => setStore(data))
+  }, [])
+
+  // ── Realtime: warn cashier when an online order drops stock of a cart item ──
+  useEffect(() => {
+    const channel = supabase
+      .channel('billing-stock-watch')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'products' },
+        (payload) => {
+          const updated = payload.new
+          const affectedItem = cartRef.current.find(i => i.id === updated.id)
+          if (!affectedItem) return
+
+          const available = updated.current_stock - (updated.reserved_stock || 0)
+
+          if (available < affectedItem.qty) {
+            toast(
+              (t) => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#92400e' }}>
+                    ⚠ Online order reduced stock!
+                  </div>
+                  <div style={{ fontSize: 12, color: '#78350f' }}>
+                    <strong>{affectedItem.name}</strong>: only {available} left (you have {affectedItem.qty} in cart)
+                  </div>
+                  <div style={{ fontSize: 11, color: '#92400e' }}>Review cart quantities before completing the sale.</div>
+                </div>
+              ),
+              {
+                duration: 8000,
+                style: {
+                  background: '#fef3c7',
+                  border: '1px solid #fcd34d',
+                  borderRadius: 10,
+                  maxWidth: 340,
+                },
+              }
+            )
+            // Auto-clamp cart qty to available
+            if (available <= 0) {
+              setCart(prev => prev.filter(i => i.id !== updated.id))
+            } else {
+              setCart(prev => prev.map(i =>
+                i.id === updated.id
+                  ? { ...i, current_stock: available, qty: Math.min(i.qty, available) }
+                  : i
+              ))
+            }
+          } else {
+            // Stock changed but still enough — silently update the display stock
+            setCart(prev => prev.map(i =>
+              i.id === updated.id ? { ...i, current_stock: updated.current_stock } : i
+            ))
+          }
+        }
+      )
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
   }, [])
 
   const totals = computeTotals(cart, discountPct)
@@ -596,6 +661,9 @@ const Billing = () => {
           payment_status: 'PAID',
           notes: notes.trim() || null,
           created_by: isValidUuid(user?.id) ? user.id : null,
+          sale_channel: 'POS',
+          channel: 'offline',
+          order_status: 'confirmed',
         })
         .select()
         .single()
@@ -653,28 +721,47 @@ const Billing = () => {
         }).eq('id', customerId)
       }
 
-      // ---- STEP 5: Deduct stock + record movements ----
+      // ── STEP 5: Atomic stock deduction via DB RPC (race-condition safe) ──
+      // deduct_stock() uses SELECT ... FOR UPDATE (row-level lock).
+      // If an online order already took the last unit between STEP 1 validation
+      // and now, this will return success:false and we abort cleanly.
+      const stockDeductErrors = []
       for (const item of cart) {
-        const { data: freshProduct } = await supabase
-          .from('products')
-          .select('current_stock')
-          .eq('id', item.id)
-          .single()
-
-        const newStock = (freshProduct?.current_stock || 0) - item.qty
-
-        await supabase.from('products').update({ current_stock: newStock }).eq('id', item.id)
-
-        await supabase.from('inventory_movements').insert({
-          product_id: item.id,
-          movement_type: 'SALE',
-          quantity: item.qty,
-          previous_stock: freshProduct?.current_stock || 0,
-          new_stock: newStock,
-          reason: `Sale — Invoice ${invoice.invoice_number}`,
-          reference_id: invoice.id,
-          performed_by: isValidUuid(user?.id) ? user.id : null,
+        const { data: rpcResult, error: rpcErr } = await supabase.rpc('deduct_stock', {
+          p_product_id:   item.id,
+          p_quantity:     item.qty,
+          p_channel:      'POS',
+          p_reference_id: invoice.id,
+          p_performed_by: isValidUuid(user?.id) ? user.id : null,
         })
+
+        if (rpcErr) {
+          stockDeductErrors.push({ name: item.name, error: rpcErr.message })
+          continue
+        }
+
+        if (!rpcResult?.success) {
+          stockDeductErrors.push({
+            name: item.name,
+            requested: item.qty,
+            available: rpcResult?.available ?? 0,
+            error: rpcResult?.error || 'Insufficient stock',
+          })
+        }
+      }
+
+      if (stockDeductErrors.length > 0) {
+        // Stock changed between validation and deduction (online order race)
+        // Surface the error — invoice was created so mark as cancelled
+        await supabase.from('invoices').update({ payment_status: 'CANCELLED' }).eq('id', invoice.id)
+        setStockErrors(stockDeductErrors.map(e => ({
+          name: e.name,
+          requested: e.requested ?? 0,
+          available: e.available ?? 0,
+        })))
+        toast.error('⚠ Stock changed by an online order! Sale aborted — please review cart quantities.')
+        setSubmitting(false)
+        return
       }
 
       // ---- STEP 6: Record Payment ----

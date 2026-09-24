@@ -166,6 +166,28 @@ const Dashboard = () => {
     return Object.values(map).sort((a, b) => b.units - a.units).slice(0, 5)
   }, [invoiceItems])
 
+  // Channel Revenue Breakdown (uses the channel column added in migration_channel_tracking.sql)
+  // Falls back gracefully — if the column doesn't exist yet, all invoices land in 'offline'
+  const channelBreakdown = useMemo(() => {
+    const CHANNEL_LABELS = {
+      offline:   { label: 'Offline (POS)', color: '#111827', bg: '#f3f4f6' },
+      website:   { label: 'Website',       color: '#2563eb', bg: '#eff6ff' },
+      amazon:    { label: 'Amazon',         color: '#f59e0b', bg: '#fffbeb' },
+      flipkart:  { label: 'Flipkart',       color: '#3b82f6', bg: '#eff6ff' },
+      instagram: { label: 'Instagram',      color: '#ec4899', bg: '#fdf2f8' },
+      whatsapp:  { label: 'WhatsApp',       color: '#16a34a', bg: '#dcfce7' },
+      other:     { label: 'Other',          color: '#6b7280', bg: '#f9fafb' },
+    }
+    const map = {}
+    invoices.forEach(inv => {
+      const ch = inv.channel || 'offline'  // fallback if column not yet migrated
+      if (!map[ch]) map[ch] = { channel: ch, revenue: 0, count: 0, ...CHANNEL_LABELS[ch] }
+      map[ch].revenue += Number(inv.grand_total || 0)
+      map[ch].count += 1
+    })
+    return Object.values(map).sort((a, b) => b.revenue - a.revenue)
+  }, [invoices])
+
   // Recent Invoices (Latest 6)
   const recentInvoices = useMemo(() => invoices.slice(0, 6), [invoices])
 
@@ -250,6 +272,34 @@ const Dashboard = () => {
           />
         )}
       </div>
+
+      {/* Channel Revenue Breakdown */}
+      {channelBreakdown.length > 0 && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-header">
+            <span className="card-title">Revenue by Channel</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>All-time breakdown — totals unchanged</span>
+          </div>
+          <div className="card-body">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
+              {channelBreakdown.map(ch => (
+                <div key={ch.channel} style={{
+                  background: ch.bg || '#f9fafb',
+                  borderRadius: 'var(--radius)',
+                  padding: '12px 14px',
+                  border: `1px solid ${ch.color}22`,
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: ch.color, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                    {ch.label || ch.channel}
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 800 }}>{INR(ch.revenue)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ch.count} invoice{ch.count !== 1 ? 's' : ''}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sales Overview & Inventory Overview Charts */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1.1fr', gap: 20, marginBottom: 20 }}>

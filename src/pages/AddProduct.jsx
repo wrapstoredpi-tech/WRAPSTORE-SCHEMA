@@ -168,9 +168,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     mobile_brand: '',
     mobile_model: '',
     description: '',
-    purchase_price: '',
     selling_price: '',
-    discount_percentage: '0',
     gst_percentage: '18',
     initial_stock: '',
     min_stock_level: '5',
@@ -409,7 +407,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   const validate = () => {
     const e = {}
     if (!form.product_type && !form.category_id) e.product_type = 'Product category is required'
-
     // Validate variants
     const effectiveVars = variantsList.length > 0 ? variantsList : (
       (variantDraft.name || variantDraft.purchase_price || variantDraft.selling_price || variantDraft.mrp) ? [variantDraft] : []
@@ -425,7 +422,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         }
       }
     }
-
     const requiresModel = (form.mobile_brand === 'Apple' || form.mobile_brand === 'Samsung') && modelOptions.length > 0
     if (requiresModel && selectedModels.length === 0) e.mobile_model = 'Select at least one compatible mobile model'
     setErrors(e)

@@ -19,6 +19,7 @@ import Customers from './pages/Customers'
 import Sales from './pages/Sales'
 import SmartInventory from './pages/SmartInventory'
 import Reports from './pages/Reports'
+import OnlineOrders from './pages/OnlineOrders'
 import OnlineSales from './pages/OnlineSales'
 
 const ProtectedRoute = ({ children }) => {
@@ -53,6 +54,10 @@ const AppRoutes = () => (
       {/* Stage 3 — Sales Analytics & Reports */}
       <Route path="sales" element={<Sales />} />
       <Route path="reports" element={<Reports />} />
+
+      {/* Online Channel */}
+      <Route path="online-orders" element={<OnlineOrders />} />
+      <Route path="online-sales" element={<OnlineSales />} />
 
       {/* Settings */}
       <Route path="settings" element={<Settings />} />
