@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS products (
   purchase_price      NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (purchase_price >= 0),
   selling_price       NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (selling_price >= 0),
   discount_percentage NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (discount_percentage >= 0 AND discount_percentage <= 100),
-  gst_percentage      NUMERIC(5,2) NOT NULL DEFAULT 18 CHECK (gst_percentage >= 0),
+  gst_percentage      NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (gst_percentage >= 0),
   current_stock       INT NOT NULL DEFAULT 0 CHECK (current_stock >= 0),
   min_stock_level     INT NOT NULL DEFAULT 5 CHECK (min_stock_level >= 0),
   approval_status     TEXT NOT NULL DEFAULT 'PENDING_APPROVAL'
