@@ -4,14 +4,14 @@
 -- (https://supabase.com/dashboard/project/ppwpedkqlgjvdosxabtf/sql/new)
 -- ============================================================
 
--- 1. Change the default GST percentage for products table from 18% to 0%
+-- 1. Ensure the default GST percentage for products table is 18%
 ALTER TABLE public.products 
-ALTER COLUMN gst_percentage SET DEFAULT 0;
+ALTER COLUMN gst_percentage SET DEFAULT 18;
 
--- 2. Update all existing products in DB with 18% GST to 0% GST
+-- 2. Update existing products in DB to 18% GST
 UPDATE public.products 
-SET gst_percentage = 0 
-WHERE gst_percentage = 18 OR gst_percentage IS NULL;
+SET gst_percentage = 18 
+WHERE gst_percentage IS NULL OR gst_percentage = 0;
 
 -- 3. Verify the changes
 SELECT id, name, product_id, selling_price, gst_percentage 

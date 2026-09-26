@@ -169,7 +169,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     mobile_model: '',
     description: '',
     selling_price: '',
-    gst_percentage: '0',
+    gst_percentage: '18',
     initial_stock: '',
     min_stock_level: '5',
     ...(prefillData || {}),
@@ -272,7 +272,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           purchase_price: data.purchase_price || '',
           selling_price: data.selling_price || '',
           discount_percentage: data.discount_percentage || '0',
-          gst_percentage: data.gst_percentage != null ? data.gst_percentage.toString() : '0',
+          gst_percentage: data.gst_percentage != null ? data.gst_percentage.toString() : '18',
           initial_stock: data.current_stock || '',
           min_stock_level: data.min_stock_level || '5',
         })

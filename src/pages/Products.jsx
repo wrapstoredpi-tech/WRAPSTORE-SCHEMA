@@ -114,63 +114,86 @@ const Products = () => {
   }
 
   const handleDelete = async () => {
+    if (!deleteId) return
     setDeleting(true)
     try {
-      // 1. Fetch storage_path for all images of the target product
-      const { data: imgRows, error: fetchErr } = await supabase
-        .from('product_images')
-        .select('storage_path')
-        .eq('product_id', deleteId)
+      const removeLocalFallback = (id) => {
+        try {
+          const stored = localStorage.getItem('wrapstore_custom_products_v1')
+          if (stored) {
+            const list = JSON.parse(stored)
+            const filtered = list.filter(p => p.id !== id)
+            localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(filtered))
+          }
+        } catch (e) {
+          console.warn('LocalStorage cleanup note:', e)
+        }
+      }
 
-      if (fetchErr) {
-        console.error('Failed to fetch product image storage paths before deletion:', fetchErr)
-        toast.error(`Failed to prepare product deletion: ${fetchErr.message}`)
-        setDeleting(false)
+      // Handle local-only fallback products
+      if (typeof deleteId === 'string' && deleteId.startsWith('prod-local-')) {
+        removeLocalFallback(deleteId)
+        toast.success('Product deleted successfully.')
+        setDeleteId(null)
+        fetchProducts()
         return
       }
 
-      const storagePaths = (imgRows || []).map(r => r.storage_path).filter(Boolean)
+      // 1. Fetch storage_path for images (non-fatal if none or fails)
+      try {
+        const { data: imgRows } = await supabase
+          .from('product_images')
+          .select('storage_path')
+          .eq('product_id', deleteId)
 
-      // 2. Delete physical files using Supabase Storage API
-      if (storagePaths.length > 0) {
-        const { data: removeData, error: removeErr } = await supabase
-          .storage
-          .from('product-images')
-          .remove(storagePaths)
-
-        if (removeErr) {
-          console.error('Storage deletion failed for paths:', storagePaths, removeErr)
-          toast.error(`Storage image deletion failed: ${removeErr.message}. Aborting product deletion.`)
-          setDeleting(false)
-          return
+        const storagePaths = (imgRows || []).map(r => r.storage_path).filter(Boolean)
+        if (storagePaths.length > 0) {
+          await supabase.storage.from('product-images').remove(storagePaths)
         }
-
-        console.log('Successfully removed storage objects:', removeData)
+      } catch (imgErr) {
+        console.warn('Image storage cleanup note:', imgErr)
       }
 
-      // 3. Only after successful Storage deletion, delete the product record from database
-      const { error: dbErr } = await supabase.from('products').delete().eq('id', deleteId)
-      if (dbErr) {
-        if (dbErr.code === '23503') {
-          const { error: softErr } = await supabase.from('products').update({ is_active: false }).eq('id', deleteId)
-          if (softErr) {
-            toast.error(softErr.message)
-          } else {
-            toast.success('Product is linked to sales records, so it was archived.')
-            setDeleteId(null)
-            fetchProducts()
-          }
-        } else {
-          toast.error(dbErr.message)
-        }
+      // 2. Delete product_images rows for this product
+      try {
+        await supabase.from('product_images').delete().eq('product_id', deleteId)
+      } catch (e) {
+        console.warn('product_images DB delete note:', e)
+      }
+
+      // 3. Attempt hard delete from products with .select() to confirm affected rows
+      const { data: deletedRows, error: dbErr } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', deleteId)
+        .select()
+
+      if (!dbErr && deletedRows && deletedRows.length > 0) {
+        removeLocalFallback(deleteId)
+        toast.success('Product deleted successfully.')
+        setDeleteId(null)
+        fetchProducts()
+        return
+      }
+
+      // 4. Fallback: If hard delete was blocked (e.g. linked to inventory/sales foreign key, or RLS policy), soft-delete (archive) instead
+      const { error: softErr } = await supabase
+        .from('products')
+        .update({ is_active: false })
+        .eq('id', deleteId)
+
+      if (softErr) {
+        console.error('Soft delete error:', softErr)
+        toast.error(softErr.message || 'Failed to delete product')
       } else {
-        toast.success('Product and associated images deleted successfully.')
+        removeLocalFallback(deleteId)
+        toast.success('Product removed / archived successfully.')
         setDeleteId(null)
         fetchProducts()
       }
     } catch (err) {
       console.error('Unexpected error during product deletion:', err)
-      toast.error('An unexpected error occurred while deleting the product.')
+      toast.error(err.message || 'An unexpected error occurred while deleting the product.')
     } finally {
       setDeleting(false)
     }
