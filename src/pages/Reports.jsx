@@ -484,7 +484,6 @@ const Reports = () => {
                         <th>Payment</th>
                         <th style={{ textAlign: 'right' }}>GST</th>
                         <th style={{ textAlign: 'right' }}>Grand Total</th>
-                        <th style={{ textAlign: 'center' }}>WhatsApp</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -508,11 +507,6 @@ const Reports = () => {
                           <td><span className="badge badge-secondary">{inv.payment_method}</span></td>
                           <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)' }}>{INR(inv.gst_amount)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 800 }}>{INR(inv.grand_total)}</td>
-                          <td style={{ textAlign: 'center' }}>
-                            <span className={`badge ${inv.whatsapp_status === 'SENT' ? 'badge-success' : inv.whatsapp_status === 'FAILED' ? 'badge-danger' : 'badge-warning'}`}>
-                              {inv.whatsapp_status === 'SENT' ? 'Sent ✓' : inv.whatsapp_status === 'FAILED' ? 'Failed' : 'Pending'}
-                            </span>
-                          </td>
                         </tr>
                       ))}
                     </tbody>

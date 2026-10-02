@@ -5,6 +5,8 @@ import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import AddProduct from './AddProduct'
 
+import { getMrp } from '../lib/productUtils'
+
 const EditProduct = () => {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -43,6 +45,7 @@ const EditProduct = () => {
 
   // Map product fields to form format
   const prefillData = {
+    id: product.id,
     name: product.name,
     product_type: product.product_type,
     category_id: product.category_id || '',
@@ -52,10 +55,14 @@ const EditProduct = () => {
     color_variants: product.color_variants || '',
     description: product.description || '',
     purchase_price: product.purchase_price?.toString() || '',
+    mrp: getMrp(product)?.toString() || '',
     selling_price: product.selling_price?.toString() || '',
     discount_percentage: product.discount_percentage?.toString() || '0',
     gst_percentage: product.gst_percentage != null ? product.gst_percentage.toString() : '18',
+    current_stock: product.current_stock?.toString() || '0',
+    initial_stock: product.current_stock?.toString() || '0',
     min_stock_level: product.min_stock_level?.toString() || '5',
+    product_images: product.product_images || [],
   }
 
   return (

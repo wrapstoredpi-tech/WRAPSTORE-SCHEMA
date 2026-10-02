@@ -11,6 +11,7 @@ import {
   Package, ChevronRight, ShieldAlert, CheckCircle2
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { getFormattedProductName } from '../lib/productUtils'
 
 const INR = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -311,7 +312,7 @@ const SmartInventory = () => {
                     <code style={{ background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 700 }}>
                       {prod.product_id}
                     </code>
-                    <span style={{ fontWeight: 700, fontSize: 14 }}>{prod.name}</span>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{getFormattedProductName(prod)}</span>
                     {prod.mobile_model && (
                       <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>({prod.mobile_model})</span>
                     )}

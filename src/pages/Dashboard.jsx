@@ -447,7 +447,6 @@ const Dashboard = () => {
                     <th>Customer</th>
                     <th>Total</th>
                     <th>Payment</th>
-                    <th>WhatsApp</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -470,15 +469,6 @@ const Dashboard = () => {
                       <td>
                         <span className="badge badge-secondary" style={{ fontSize: 10 }}>
                           {inv.payment_method}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`badge ${
-                          inv.whatsapp_status === 'SENT' ? 'badge-success' :
-                          inv.whatsapp_status === 'FAILED' ? 'badge-danger' : 'badge-warning'
-                        }`} style={{ fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                          <MessageCircle size={9} />
-                          {inv.whatsapp_status === 'SENT' ? 'Sent ✓' : inv.whatsapp_status === 'FAILED' ? 'Failed' : 'Pending'}
                         </span>
                       </td>
                     </tr>

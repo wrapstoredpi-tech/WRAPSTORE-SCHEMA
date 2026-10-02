@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { fetchMergedCategories } from '../lib/categoryStorage'
+import { getMrp } from '../lib/productUtils'
 
 const IPHONE_MODELS = [
   'iPhone 18 Pro Max', 'iPhone 18 Pro', 'iPhone 18 Plus', 'iPhone 18',
@@ -84,6 +85,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     mrp: '',
     selling_price: '',
     quantity: '',
+    color: '',
     images: [],
   })
 
@@ -118,10 +120,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       setEditingVariantId(null)
       toast.success('Product variant updated!')
     } else {
+      const assignedColor = variantDraft.color || (selectedColors.length > variantsList.length ? selectedColors[variantsList.length] : selectedColors[0] || '')
       const newVar = {
         ...variantDraft,
+        color: assignedColor,
         id: `variant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        name: variantDraft.name.trim() || `Variant ${variantsList.length + 1}`,
+        name: variantDraft.name.trim() || (assignedColor ? `${form.name || 'Silicon Case'} - ${assignedColor}` : `Variant ${variantsList.length + 1}`),
       }
       setVariantsList(prev => [...prev, newVar])
       toast.success('Product variant added!')
@@ -134,6 +138,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       mrp: '',
       selling_price: '',
       quantity: '',
+      color: '',
       images: [],
     })
   }
@@ -239,10 +244,32 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   const [newColorInput, setNewColorInput] = useState('')
 
   useEffect(() => {
-    if (prefillData?.color_variants || prefillData?.color) {
-      const prefilled = parseModels(prefillData.color_variants || prefillData.color)
-      setSelectedColors(prefilled)
-      setAvailableColors(prev => Array.from(new Set([...prev, ...prefilled])))
+    if (prefillData) {
+      const mrpValue = prefillData.mrp || getMrp(prefillData)
+      const colorVal = prefillData.color_variants || prefillData.color || ''
+      const prefilledColors = parseModels(colorVal)
+
+      setSelectedColors(prefilledColors)
+      setAvailableColors(prev => Array.from(new Set([...prev, ...prefilledColors])))
+
+      const initialVariant = {
+        id: `variant-existing-${prefillData.id || Date.now()}`,
+        name: prefillData.name || '',
+        description: prefillData.description || '',
+        purchase_price: prefillData.purchase_price?.toString() || '',
+        mrp: mrpValue ? mrpValue.toString() : '',
+        selling_price: prefillData.selling_price?.toString() || '',
+        quantity: (prefillData.current_stock ?? prefillData.initial_stock)?.toString() || '',
+        color: colorVal,
+        images: (prefillData.product_images || []).map(img => ({
+          id: img.id,
+          preview: img.public_url || img.preview,
+          existing: true,
+        })),
+      }
+
+      setVariantDraft({ ...initialVariant })
+      setVariantsList([initialVariant])
     }
   }, [prefillData])
 
@@ -261,6 +288,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           navigate('/products')
           return
         }
+        const mrpValue = getMrp(data)
+        const colorVal = data.color_variants || ''
+        const colors = parseModels(colorVal)
+
         setForm({
           name: data.name || '',
           product_type: data.product_type || '',
@@ -269,23 +300,42 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           mobile_brand: data.mobile_brand || '',
           mobile_model: data.mobile_model || '',
           description: data.description || '',
-          purchase_price: data.purchase_price || '',
-          selling_price: data.selling_price || '',
-          discount_percentage: data.discount_percentage || '0',
+          purchase_price: data.purchase_price?.toString() || '',
+          selling_price: data.selling_price?.toString() || '',
+          discount_percentage: data.discount_percentage?.toString() || '0',
           gst_percentage: data.gst_percentage != null ? data.gst_percentage.toString() : '18',
-          initial_stock: data.current_stock || '',
-          min_stock_level: data.min_stock_level || '5',
+          initial_stock: data.current_stock?.toString() || '',
+          min_stock_level: data.min_stock_level?.toString() || '5',
         })
         setSelectedModels(parseModels(data.mobile_model))
-        setSelectedColors(parseModels(data.color_variants))
-        if (data.product_images?.length) {
-          setImages(data.product_images.map(img => ({
-            id: img.id,
-            preview: img.public_url,
-            isPrimary: img.is_primary,
-            existing: true,
-          })))
+        setSelectedColors(colors)
+
+        const mappedImages = (data.product_images || []).map(img => ({
+          id: img.id,
+          preview: img.public_url,
+          isPrimary: img.is_primary,
+          existing: true,
+        }))
+
+        if (mappedImages.length) {
+          setImages(mappedImages)
         }
+
+        const initialVariant = {
+          id: `variant-existing-${data.id}`,
+          name: data.name || '',
+          description: data.description || '',
+          purchase_price: data.purchase_price?.toString() || '',
+          mrp: mrpValue ? mrpValue.toString() : '',
+          selling_price: data.selling_price?.toString() || '',
+          quantity: data.current_stock?.toString() || '',
+          color: colorVal,
+          images: mappedImages,
+        }
+
+        setVariantDraft({ ...initialVariant })
+        setVariantsList([initialVariant])
+
         setIsLoading(false)
       })
   }, [productId, navigate])
@@ -446,19 +496,18 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       const colorsStr = selectedColors.length > 0 ? selectedColors.join(', ') : null
 
       const generateProductName = (varName = '') => {
-        if (varName && varName.trim()) return varName.trim()
-        if (form.name && form.name.trim()) return form.name.trim()
-        const brand = form.mobile_brand && form.mobile_brand !== 'Universal' ? form.mobile_brand : ''
-        const catObj = activeCategories.find(c => c.id === form.category_id)
-        const catName = catObj ? catObj.name : 'Product'
-        let modelSummary = ''
-        if (selectedModels.length === 1) {
-          modelSummary = selectedModels[0]
-        } else if (selectedModels.length > 1) {
-          modelSummary = `${selectedModels[0]} +${selectedModels.length - 1} models`
+        let baseName = form.name && form.name.trim() ? form.name.trim() : ''
+        if (!baseName) {
+          const catObj = activeCategories.find(c => c.id === form.category_id)
+          baseName = catObj ? catObj.name : 'Product'
         }
-        const parts = [brand, modelSummary, catName].filter(Boolean)
-        return parts.join(' ') || 'New Product'
+
+        const vName = varName && varName.trim() ? varName.trim() : ''
+        if (vName && vName.toLowerCase() !== baseName.toLowerCase() && !baseName.toLowerCase().includes(vName.toLowerCase())) {
+          return `${baseName} - ${vName}`
+        }
+
+        return baseName
       }
 
       // Check effective variants list
@@ -528,6 +577,16 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         const sellingPrice = Number(v.selling_price || 0)
         const mrpPrice = Number(v.mrp || 0)
         const quantity = Number(v.quantity || 0)
+
+        // Assign unique color for THIS variant instance
+        let variantColor = v.color || v.color_variant || v.color_variants || null
+        if (!variantColor && selectedColors.length > 0) {
+          variantColor = selectedColors[i] || selectedColors[i % selectedColors.length] || null
+        }
+        if (!variantColor && v.name && v.name.trim() && v.name.trim().toLowerCase() !== form.name.trim().toLowerCase()) {
+          variantColor = v.name.trim()
+        }
+
         const prodName = generateProductName(v.name)
 
         const payload = {
@@ -537,7 +596,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           subcategory_id: resolvedSubcategoryId,
           mobile_brand: form.mobile_brand || null,
           mobile_model: selectedModels.length > 0 ? selectedModels.join(', ') : (form.mobile_model || null),
-          color_variants: colorsStr,
+          color_variants: variantColor,
           description: v.description || form.description || null,
           purchase_price: purchasePrice,
           selling_price: sellingPrice,
@@ -556,7 +615,17 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         let productUuid = null
         let isLocalFallback = false
 
-        let { data, error } = await supabase.from('products').insert(payload).select().single()
+        const targetId = (productId || prefillData?.id) && i === 0 ? (productId || prefillData?.id) : null
+        let data, error
+        if (targetId) {
+          const res = await supabase.from('products').update(payload).eq('id', targetId).select().single()
+          data = res.data
+          error = res.error
+        } else {
+          const res = await supabase.from('products').insert(payload).select().single()
+          data = res.data
+          error = res.error
+        }
 
         if (error) {
           console.warn('DB Insert error for product variant:', error.message)
@@ -718,7 +787,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
               </div>
 
               {/* Brand Compatibility */}
-              <div className="form-group" style={{ marginBottom: 0 }}>
+              <div className="form-group" style={{ marginBottom: '24px' }}>
                 <label className="form-label">Brand Compatibility</label>
                 <div style={{ display: 'flex', gap: '6px' }}>
                   {['Apple', 'Samsung', 'Universal'].map(b => (
@@ -737,13 +806,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                   ))}
                 </div>
               </div>
-            </div>
-          </div>
 
-          {/* Variants Tile */}
-          <div className="card">
-            <div className="card-header"><span className="card-title">Variants</span></div>
-            <div className="card-body">
+              <hr style={{ margin: '24px 0', border: 'none', borderTop: '1px solid var(--border)' }} />
+
               {/* Compatible Mobile Models */}
               {form.mobile_brand !== 'Universal' && modelOptions.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
@@ -927,109 +992,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                 </div>
               )}
 
-              {/* Colour Variants Selection */}
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <label className="form-label" style={{ marginBottom: 0 }}>
-                    Colour Variants
-                  </label>
-                  {selectedColors.length > 0 && (
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>
-                      {selectedColors.length} Selected ({selectedColors.join(', ')})
-                    </span>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                  {availableColors.map(color => {
-                    const isSelected = selectedColors.includes(color)
-                    return (
-                      <button
-                        key={color}
-                        type="button"
-                        onClick={() => toggleColor(color)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 14px',
-                          borderRadius: 'var(--radius-full)',
-                          border: isSelected ? '1.5px solid #111827' : '1px solid #d1d5db',
-                          background: isSelected ? '#111827' : '#ffffff',
-                          color: isSelected ? '#ffffff' : '#374151',
-                          fontWeight: isSelected ? 700 : 500,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          transition: 'all 0.15s ease',
-                          boxShadow: isSelected ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
-                        }}
-                      >
-                        {isSelected && <span style={{ fontSize: '11px', fontWeight: 800 }}>✓</span>}
-                        {color}
-                      </button>
-                    )
-                  })}
-
-                  {/* + Add New Button / Inline Input */}
-                  {showAddColorInput ? (
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="Type color name..."
-                        value={newColorInput}
-                        onChange={e => setNewColorInput(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault()
-                            handleAddCustomColor()
-                          }
-                        }}
-                        autoFocus
-                        style={{ fontSize: '12px', padding: '5px 10px', width: '150px', height: '32px' }}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-primary"
-                        onClick={handleAddCustomColor}
-                        style={{ padding: '5px 12px', fontSize: '12px', height: '32px' }}
-                      >
-                        Add
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-ghost"
-                        onClick={() => { setShowAddColorInput(false); setNewColorInput('') }}
-                        style={{ padding: '5px 8px', fontSize: '12px', height: '32px' }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setShowAddColorInput(true)}
-                      style={{
-                        fontSize: '12px',
-                        padding: '6px 14px',
-                        borderRadius: 'var(--radius-full)',
-                        border: '1.5px dashed #9ca3af',
-                        background: '#f9fafb',
-                        color: '#4b5563',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      + Add New
-                    </button>
-                  )}
-                </div>
-              </div>
-
               {/* Product Variant Builder Section */}
               <hr style={{ margin: '24px 0', border: 'none', borderTop: '1px solid var(--border)' }} />
 
@@ -1115,6 +1077,114 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                     ))}
                   </div>
                 </div>
+
+                {/* Colour Variants Selection */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label className="form-label" style={{ marginBottom: 0 }}>
+                      Colour Variants
+                    </label>
+                    {selectedColors.length > 0 && (
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>
+                        {selectedColors.length} Selected ({selectedColors.join(', ')})
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    {availableColors.map(color => {
+                      const isSelected = selectedColors.includes(color)
+                      return (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => toggleColor(color)}
+                          style={{
+                            fontSize: '12px',
+                            padding: '6px 14px',
+                            borderRadius: 'var(--radius-full)',
+                            border: isSelected ? '1.5px solid #111827' : '1px solid #d1d5db',
+                            background: isSelected ? '#111827' : '#ffffff',
+                            color: isSelected ? '#ffffff' : '#374151',
+                            fontWeight: isSelected ? 700 : 500,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            transition: 'all 0.15s ease',
+                            boxShadow: isSelected ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
+                          }}
+                        >
+                          {isSelected && <span style={{ fontSize: '11px', fontWeight: 800 }}>✓</span>}
+                          {color}
+                        </button>
+                      )
+                    })}
+
+                    {/* + Add New Button / Inline Input */}
+                    {showAddColorInput ? (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="Type color name..."
+                          value={newColorInput}
+                          onChange={e => setNewColorInput(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              handleAddCustomColor()
+                            }
+                          }}
+                          autoFocus
+                          style={{ fontSize: '12px', padding: '5px 10px', width: '150px', height: '32px' }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          onClick={handleAddCustomColor}
+                          style={{ padding: '5px 12px', fontSize: '12px', height: '32px' }}
+                        >
+                          Add
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => { setShowAddColorInput(false); setNewColorInput('') }}
+                          style={{ padding: '5px 8px', fontSize: '12px', height: '32px' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddColorInput(true)}
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 14px',
+                          borderRadius: 'var(--radius-full)',
+                          border: '1.5px dashed #9ca3af',
+                          background: '#f9fafb',
+                          color: '#4b5563',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        + Add New
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Product Details Section Heading */}
+                <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', margin: '12px 0 4px 0' }}>
+                  Product details
+                </h3>
 
                 {/* Name & Description Row */}
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
@@ -1233,6 +1303,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                       <tr style={{ background: '#f9fafb', borderBottom: '2px solid var(--border-strong)', color: '#111827', fontWeight: 700 }}>
                         <th style={{ padding: '12px 14px' }}>Product Image</th>
                         <th style={{ padding: '12px 14px' }}>Product Name</th>
+                        <th style={{ padding: '12px 14px' }}>Colour Variant</th>
                         <th style={{ padding: '12px 14px' }}>Purchase Price</th>
                         <th style={{ padding: '12px 14px' }}>MRP</th>
                         <th style={{ padding: '12px 14px' }}>Selling Price</th>
@@ -1243,12 +1314,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                     <tbody>
                       {variantsList.length === 0 ? (
                         <tr>
-                          <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                          <td colSpan={8} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
                             No product variants added yet. Add a variant above to configure products.
                           </td>
                         </tr>
                       ) : (
-                        variantsList.map((variant) => (
+                        variantsList.map((variant, idx) => (
                           <tr key={variant.id} style={{ borderBottom: '1px solid var(--border)' }}>
                             <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
                               {variant.images && variant.images.length > 0 ? (
@@ -1273,6 +1344,11 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                                   {variant.description}
                                 </div>
                               )}
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                              <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', background: '#f3f4f6', color: '#111827', fontWeight: 700, border: '1px solid #e5e7eb' }}>
+                                {variant.color || (selectedColors.length > idx ? selectedColors[idx] : '—')}
+                              </span>
                             </td>
                             <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
                               ₹{Number(variant.purchase_price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}

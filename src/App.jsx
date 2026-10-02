@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Categories from './pages/Categories'
 import Products from './pages/Products'
 import AddProduct from './pages/AddProduct'
+import AddCombo from './pages/AddCombo'
 import EditProduct from './pages/EditProduct'
 import ProductApproval from './pages/ProductApproval'
 import Inventory from './pages/Inventory'
@@ -82,6 +83,8 @@ const AppRoutes = () => (
       <Route path="categories" element={<Categories />} />
       <Route path="products" element={<Products />} />
       <Route path="products/add" element={<AddProduct />} />
+      <Route path="combos" element={<AddCombo />} />
+      <Route path="products/add-combo" element={<AddCombo />} />
       <Route path="products/edit/:id" element={<EditProduct />} />
       <Route path="products/approval" element={
         <ProtectedRoute requireSuperAdmin={true}><ProductApproval /></ProtectedRoute>

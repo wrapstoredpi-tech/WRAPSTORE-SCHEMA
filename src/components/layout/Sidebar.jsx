@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ShoppingBag, Tag, Package, Warehouse,
   Settings, LogOut, ShieldCheck, Smartphone,
   Receipt, FileText, Users, TrendingUp, Sparkles,
-  BarChart2, FileBarChart, Activity, Globe
+  BarChart2, FileBarChart, Activity, Globe, PackagePlus
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../lib/supabase'
@@ -119,7 +119,6 @@ const Sidebar = ({ isCollapsed = false, toggleSidebar }) => {
         {/* Billing & Sales */}
         <div style={{ height: '8px' }} />
         {!isCollapsed && <div className="sidebar-section-label">Billing & Sales</div>}
-        <NavItem to="/billing" icon={Receipt} label="New Invoice" isCollapsed={isCollapsed} />
         <NavItem to="/invoices" icon={FileText} label="Invoice History" isCollapsed={isCollapsed} />
         <NavItem to="/sales" icon={TrendingUp} label="Sales Analytics" isCollapsed={isCollapsed} />
 
@@ -127,6 +126,7 @@ const Sidebar = ({ isCollapsed = false, toggleSidebar }) => {
         <div style={{ height: '8px' }} />
         {!isCollapsed && <div className="sidebar-section-label">Catalog & Stock</div>}
         <NavItem to="/products" icon={Smartphone} label="Products" isCollapsed={isCollapsed} />
+        <NavItem to="/combos" icon={PackagePlus} label="Add Combo" isCollapsed={isCollapsed} />
         <NavItem to="/categories" icon={Tag} label="Categories" isCollapsed={isCollapsed} />
         <NavItem to="/inventory" icon={Warehouse} label="Inventory" isCollapsed={isCollapsed} />
 

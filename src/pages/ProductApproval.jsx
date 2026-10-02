@@ -7,6 +7,7 @@ import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import ProductImageHover from '../components/common/ProductImageHover'
+import { getFormattedProductName } from '../lib/productUtils'
 
 const formatProductType = (p) => {
   if (p?.categories?.name) return p.categories.name
@@ -221,13 +222,14 @@ const ProductApproval = () => {
             const isOpen = expanded[p.id]
             const imgUrl = getPrimaryImage(p.product_images)
             const isProcessing = processing === p.id
+            const displayName = getFormattedProductName(p)
 
             return (
               <div key={p.id} className="card" style={{ overflow: 'hidden' }}>
                 {/* Summary Row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px 20px' }}>
                   {/* Image with Hover & Multi-Image Gallery Preview */}
-                  <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={p.name} alt={p.name} size={56} />
+                  <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={displayName} alt={displayName} size={56} />
 
                   {/* Info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -238,7 +240,7 @@ const ProductApproval = () => {
                       <span className="product-type-tag">{formatProductType(p)}</span>
                     </div>
                     <div style={{ fontWeight: 700, fontSize: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {p.name}
+                      {displayName}
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
                       Submitted by {p.profiles?.full_name || p.profiles?.email || 'Store Manager'} ·{' '}

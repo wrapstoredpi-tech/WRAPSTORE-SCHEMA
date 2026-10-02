@@ -9,6 +9,7 @@ import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import ProductImageHover from '../components/common/ProductImageHover'
+import { getFormattedProductName } from '../lib/productUtils'
 
 const PAGE_SIZE = 15
 
@@ -285,7 +286,15 @@ const HistoryModal = ({ product, onClose }) => {
             </div>
           ) : (
             movements.map(m => {
-              const positive = POSITIVE_TYPES.includes(m.movement_type)
+              const positive = POSITIVE_TYPES.includes(m.movement_type) ||
+                (m.reason && (
+                  m.reason.toLowerCase().includes('deallocation') ||
+                  m.reason.toLowerCase().includes('reversal') ||
+                  m.reason.toLowerCase().includes('released') ||
+                  m.reason.toLowerCase().includes('return')
+                )) ||
+                (m.new_stock > m.previous_stock)
+
               return (
                 <div key={m.id} className="movement-row">
                   <div
@@ -393,7 +402,7 @@ const Inventory = () => {
       .eq('is_active', true)
 
     if (search) {
-      query = query.or(`name.ilike.%${search}%,product_id.ilike.%${search}%,mobile_model.ilike.%${search}%,mobile_brand.ilike.%${search}%`)
+      query = query.or(`name.ilike.%${search}%,product_id.ilike.%${search}%,mobile_model.ilike.%${search}%,mobile_brand.ilike.%${search}%,color_variants.ilike.%${search}%`)
     }
     if (typeFilter) {
       query = query.or(`category_id.eq.${typeFilter},product_type.eq.${typeFilter}`)
@@ -554,10 +563,11 @@ const Inventory = () => {
                   {products.map(p => {
                     const imgUrl = getPrimaryImage(p.product_images)
                     const status = getStockStatus(p)
+                    const displayName = getFormattedProductName(p)
                     return (
                       <tr key={p.id}>
                         <td>
-                          <ProductImageHover src={imgUrl} title={p.name} alt={p.name} size={40} />
+                          <ProductImageHover src={imgUrl} title={displayName} alt={displayName} size={40} />
                         </td>
                         <td>
                           <code style={{ fontSize: '11px', background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
@@ -566,7 +576,7 @@ const Inventory = () => {
                         </td>
                         <td>
                           <div style={{ fontWeight: 600, fontSize: '13px' }}>
-                            {p.name}
+                            {displayName}
                           </div>
                           {p.categories?.name && (
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 1 }}>

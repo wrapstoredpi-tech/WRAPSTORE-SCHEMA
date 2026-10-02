@@ -9,7 +9,6 @@ import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { downloadInvoicePDF, getInvoicePDFBlob } from '../lib/invoicePdf'
-import { sendWhatsAppInvoice } from '../services/whatsappService'
 
 const INR = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -483,17 +482,6 @@ const OnlineOrders = () => {
 
       // 5. Link invoice to online order
       await supabase.from('online_orders').update({ invoice_id: invoice.id }).eq('id', order.id)
-
-      // 6. Try WhatsApp
-      try {
-        await sendWhatsAppInvoice({
-          invoice,
-          pdfUrl: null,
-          customerPhone: cleanPhone,
-          grandTotal: order.grand_total,
-          customerId,
-        })
-      } catch (_) {}
 
       toast.success(`Invoice ${invoiceNum} created for online order ${order.order_number}!`)
       fetchOrders()

@@ -9,6 +9,7 @@ import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import ProductImageHover from '../components/common/ProductImageHover'
+import { getFormattedProductName, getMrp } from '../lib/productUtils'
 
 const formatProductType = (p) => {
   if (p?.categories?.name) return p.categories.name
@@ -78,7 +79,7 @@ const Products = () => {
       .eq('is_active', true)
 
     if (search) {
-      query = query.or(`name.ilike.%${search}%,product_id.ilike.%${search}%,mobile_model.ilike.%${search}%,mobile_brand.ilike.%${search}%`)
+      query = query.or(`name.ilike.%${search}%,product_id.ilike.%${search}%,mobile_model.ilike.%${search}%,mobile_brand.ilike.%${search}%,color_variants.ilike.%${search}%`)
     }
     if (typeFilter) {
       query = query.or(`category_id.eq.${typeFilter},product_type.eq.${typeFilter}`)
@@ -302,11 +303,12 @@ const Products = () => {
                     const imgUrl = getPrimaryImage(p.product_images)
                     const stockStatus = getStockStatus(p)
                     const appStatus = APPROVAL_BADGE[p.approval_status] || APPROVAL_BADGE.PENDING_APPROVAL
+                    const displayName = getFormattedProductName(p)
 
                     return (
                       <tr key={p.id}>
                         <td>
-                          <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={p.name} alt={p.name} size={40} />
+                          <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={displayName} alt={displayName} size={40} />
                         </td>
                         <td>
                           <code style={{ fontSize: '11px', background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
@@ -315,7 +317,7 @@ const Products = () => {
                         </td>
                         <td>
                           <div style={{ fontWeight: 600, fontSize: '13px' }}>
-                            {p.name}
+                            {displayName}
                           </div>
                           {p.categories?.name && (
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 1 }}>
@@ -350,6 +352,11 @@ const Products = () => {
                         </td>
                         <td>
                           <div style={{ fontWeight: 700, fontSize: '13px' }}>{formatCurrency(p.selling_price)}</div>
+                          {getMrp(p) > 0 && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                              MRP: {formatCurrency(getMrp(p))}
+                            </div>
+                          )}
                           {p.gst_percentage > 0 && (
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>+{p.gst_percentage}% GST</div>
                           )}

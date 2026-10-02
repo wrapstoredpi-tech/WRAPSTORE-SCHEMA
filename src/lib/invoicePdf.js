@@ -6,6 +6,7 @@
 
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { getFormattedProductName } from './productUtils'
 
 // Format currency reliably for jsPDF standard fonts
 const INR = (val) =>
@@ -236,7 +237,7 @@ export const generateInvoicePDF = async ({ invoice, items, store, logoUrl }) => 
 
   const tableRows = items.map((item, idx) => ({
     no: idx + 1,
-    name: item.product_name || 'Product',
+    name: getFormattedProductName(item.product || { name: item.product_name, color_variants: item.color_variants || item.color }) || item.product_name || 'Product',
     code: item.product_id_code || '—',
     model: item.mobile_model || '—',
     qty: item.quantity,
@@ -298,7 +299,6 @@ export const generateInvoicePDF = async ({ invoice, items, store, logoUrl }) => 
   const totalsRows = [
     ['Subtotal', INR(invoice.subtotal)],
     Number(invoice.discount_amount) > 0 ? ['Discount', '- ' + INR(invoice.discount_amount)] : null,
-    ['Taxable Amount', INR(invoice.taxable_amount)],
     ['GST', INR(invoice.gst_amount)],
   ].filter(Boolean)
 

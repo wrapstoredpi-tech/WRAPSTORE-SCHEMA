@@ -9,8 +9,8 @@ import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { downloadInvoicePDF, printInvoicePDF, getInvoicePDFBlob } from '../lib/invoicePdf'
-import { sendWhatsAppInvoice, retryWhatsAppDelivery } from '../services/whatsappService'
 import ProductImageHover from '../components/common/ProductImageHover'
+import { getFormattedProductName } from '../lib/productUtils'
 
 // ---- Helpers ----
 const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
@@ -23,7 +23,7 @@ const PAYMENT_METHODS = [
   { id: 'Other', label: 'Other', icon: ShoppingBag },
 ]
 
-const computeTotals = (cartItems, discountPct) => {
+const computeTotals = (cartItems, discountPct, manualDiscountAmt = 0) => {
   let subtotal = 0
   let totalGst = 0
 
@@ -36,13 +36,17 @@ const computeTotals = (cartItems, discountPct) => {
     totalGst += gst
   })
 
-  const discountAmt = subtotal * (discountPct / 100)
-  const taxableAmount = subtotal - discountAmt
-  const grandTotal = taxableAmount + totalGst
+  const pctDiscountAmt = subtotal * (discountPct / 100)
+  const manualAmt = Math.max(0, Number(manualDiscountAmt) || 0)
+  const totalDiscountAmt = pctDiscountAmt + manualAmt
+  const taxableAmount = Math.max(0, subtotal - totalDiscountAmt)
+  const grandTotal = Math.max(0, taxableAmount + totalGst)
 
   return {
     subtotal: Math.round(subtotal * 100) / 100,
-    discountAmount: Math.round(discountAmt * 100) / 100,
+    pctDiscountAmt: Math.round(pctDiscountAmt * 100) / 100,
+    manualDiscountAmt: Math.round(manualAmt * 100) / 100,
+    discountAmount: Math.round(totalDiscountAmt * 100) / 100,
     taxableAmount: Math.round(taxableAmount * 100) / 100,
     gstAmount: Math.round(totalGst * 100) / 100,
     grandTotal: Math.round(grandTotal * 100) / 100,
@@ -66,7 +70,7 @@ const ProductSearch = ({ onAddToCart }) => {
       .select('*, product_images(public_url, is_primary)')
       .eq('approval_status', 'APPROVED')
       .eq('is_active', true)
-      .or(`name.ilike.%${q}%,product_id.ilike.%${q}%,mobile_model.ilike.%${q}%,mobile_brand.ilike.%${q}%`)
+      .or(`name.ilike.%${q}%,product_id.ilike.%${q}%,mobile_model.ilike.%${q}%,mobile_brand.ilike.%${q}%,color_variants.ilike.%${q}%`)
       .gt('current_stock', 0)
       .limit(8)
     setResults(data || [])
@@ -81,7 +85,10 @@ const ProductSearch = ({ onAddToCart }) => {
   }, [query, search])
 
   const handleSelect = (product) => {
-    onAddToCart(product)
+    onAddToCart({
+      ...product,
+      name: getFormattedProductName(product),
+    })
     setQuery('')
     setResults([])
     setShowResults(false)
@@ -129,6 +136,7 @@ const ProductSearch = ({ onAddToCart }) => {
         }}>
           {results.map(p => {
             const img = getPrimaryImg(p.product_images)
+            const displayName = getFormattedProductName(p)
             return (
               <div
                 key={p.id}
@@ -145,9 +153,9 @@ const ProductSearch = ({ onAddToCart }) => {
                 onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
                 onMouseLeave={e => e.currentTarget.style.background = 'white'}
               >
-                <ProductImageHover src={img} title={p.name} alt={p.name} size={40} />
+                <ProductImageHover src={img} title={displayName} alt={displayName} size={40} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                  <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', gap: 8 }}>
                     <code style={{ background: '#f3f4f6', padding: '1px 5px', borderRadius: 3 }}>{p.product_id}</code>
                     {p.mobile_model && <span>{p.mobile_model}</span>}
@@ -291,12 +299,9 @@ const CartItemRow = ({ item, onQtyChange, onRemove }) => {
 }
 
 // ---- Success Modal ----
-const SuccessModal = ({ invoice, items, store, whatsappResult, onClose, onNewSale }) => {
+const SuccessModal = ({ invoice, items, store, onClose, onNewSale }) => {
   const [downloading, setDownloading] = useState(false)
   const [printing, setPrinting] = useState(false)
-  const [waStatus, setWaStatus] = useState(whatsappResult?.status || 'PENDING')
-  const [waError, setWaError] = useState(whatsappResult?.error || null)
-  const [retryingWa, setRetryingWa] = useState(false)
 
   const getLogoUrl = () => store?.logo_url || null
 
@@ -321,26 +326,6 @@ const SuccessModal = ({ invoice, items, store, whatsappResult, onClose, onNewSal
     setPrinting(false)
   }
 
-  const handleRetryWhatsApp = async () => {
-    setRetryingWa(true)
-    try {
-      const res = await retryWhatsAppDelivery(invoice)
-      if (res.success) {
-        setWaStatus('SENT')
-        setWaError(null)
-        toast.success(`WhatsApp delivered to ${invoice.customer_phone}!`)
-      } else {
-        setWaStatus('FAILED')
-        setWaError(res.error || 'Delivery failed')
-        toast.error('WhatsApp retry failed: ' + (res.error || 'Network error'))
-      }
-    } catch (err) {
-      setWaStatus('FAILED')
-      setWaError(err.message)
-    }
-    setRetryingWa(false)
-  }
-
   return (
     <div className="modal-overlay">
       <div className="modal modal-sm" style={{ textAlign: 'center' }}>
@@ -352,78 +337,6 @@ const SuccessModal = ({ invoice, items, store, whatsappResult, onClose, onNewSal
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
             Invoice <strong>{invoice.invoice_number}</strong> created for{' '}
             <strong>{invoice.customer_name}</strong>
-          </div>
-
-          {/* WhatsApp Live Status Card */}
-          <div style={{
-            background: waStatus === 'SENT' ? '#ecfdf5' : waStatus === 'FAILED' ? '#fef2f2' : '#f0fdf4',
-            border: `1px solid ${waStatus === 'SENT' ? '#a7f3d0' : waStatus === 'FAILED' ? '#fecaca' : '#bbf7d0'}`,
-            borderRadius: 'var(--radius)',
-            padding: '12px 14px',
-            marginBottom: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 10,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', minWidth: 0 }}>
-              <div style={{
-                width: 32,
-                height: 32,
-                borderRadius: '50%',
-                background: waStatus === 'SENT' ? '#d1fae5' : waStatus === 'FAILED' ? '#fee2e2' : '#dcfce7',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0
-              }}>
-                <MessageCircle size={16} color={waStatus === 'SENT' ? '#10b981' : waStatus === 'FAILED' ? '#ef4444' : '#16a34a'} />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: waStatus === 'SENT' ? '#065f46' : waStatus === 'FAILED' ? '#991b1b' : '#166534',
-                }}>
-                  {waStatus === 'SENT' ? 'WhatsApp Invoice Sent ✓' : waStatus === 'FAILED' ? 'WhatsApp Delivery Failed' : 'Sending via WhatsApp...'}
-                </div>
-                <div style={{
-                  fontSize: 11,
-                  color: waStatus === 'SENT' ? '#047857' : waStatus === 'FAILED' ? '#b91c1c' : '#15803d',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis'
-                }}>
-                  {waStatus === 'SENT'
-                    ? `Delivered to ${invoice.customer_phone}`
-                    : waStatus === 'FAILED'
-                    ? (waError || 'Phone unreachable')
-                    : `Dispatched to ${invoice.customer_phone}`}
-                </div>
-              </div>
-            </div>
-
-            {waStatus === 'FAILED' && (
-              <button
-                className="btn btn-sm btn-danger"
-                style={{ fontSize: 11, padding: '4px 10px', flexShrink: 0 }}
-                onClick={handleRetryWhatsApp}
-                disabled={retryingWa}
-              >
-                {retryingWa ? 'Retrying...' : 'Retry'}
-              </button>
-            )}
-            {waStatus === 'SENT' && (
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ fontSize: 11, color: '#047857', padding: '4px 8px', flexShrink: 0 }}
-                onClick={handleRetryWhatsApp}
-                disabled={retryingWa}
-                title="Resend WhatsApp invoice"
-              >
-                {retryingWa ? 'Sending...' : 'Resend'}
-              </button>
-            )}
           </div>
 
           <div style={{ background: '#f9fafb', borderRadius: 'var(--radius)', padding: '14px', marginBottom: 20, textAlign: 'left' }}>
@@ -467,6 +380,7 @@ const Billing = () => {
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [discountPct, setDiscountPct] = useState(18)
+  const [manualDiscountAmt, setManualDiscountAmt] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('Cash')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -543,7 +457,7 @@ const Billing = () => {
     return () => supabase.removeChannel(channel)
   }, [])
 
-  const totals = computeTotals(cart, discountPct)
+  const totals = computeTotals(cart, discountPct, manualDiscountAmt)
   const hasStockIssues = cart.some(item => item.qty > item.current_stock)
 
   const addToCart = (product) => {
@@ -573,6 +487,7 @@ const Billing = () => {
     setCustomerName('')
     setCustomerPhone('')
     setDiscountPct(18)
+    setManualDiscountAmt('')
     setPaymentMethod('Cash')
     setNotes('')
     setStockErrors([])
@@ -793,32 +708,11 @@ const Billing = () => {
         console.warn('PDF upload failed (non-fatal):', pdfErr)
       }
 
-      // ---- STEP 8: Automatically send PDF through WhatsApp ----
-      let whatsappRes = { success: false, status: 'PENDING' }
-      try {
-        whatsappRes = await sendWhatsAppInvoice({
-          invoice,
-          pdfUrl: uploadedPdfUrl,
-          customerPhone: cleanPhone,
-          grandTotal: totals.grandTotal,
-          customerId,
-        })
-
-        if (whatsappRes.success) {
-          toast.success(`Invoice created & sent to WhatsApp!`)
-        } else {
-          toast.success(`Invoice ${invoice.invoice_number} created!`)
-          toast.error(`WhatsApp delivery: ${whatsappRes.error || 'Failed'}`)
-        }
-      } catch (waErr) {
-        console.warn('WhatsApp dispatch warning:', waErr)
-        toast.success(`Invoice ${invoice.invoice_number} created!`)
-      }
+      toast.success(`Invoice ${invoice.invoice_number} created!`)
 
       setSuccessData({
         invoice,
         items: invoiceItemsPayload,
-        whatsappResult: whatsappRes,
       })
     } catch (err) {
       toast.error(err.message || 'Failed to complete sale. Please try again.')
@@ -835,7 +729,6 @@ const Billing = () => {
           invoice={successData.invoice}
           items={successData.items}
           store={store}
-          whatsappResult={successData.whatsappResult}
           onClose={() => setSuccessData(null)}
           onNewSale={resetBilling}
         />
@@ -935,7 +828,7 @@ const Billing = () => {
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">
                   <Phone size={11} style={{ display: 'inline', marginRight: 4 }} />
-                  WhatsApp Number <span className="required">*</span>
+                  Phone Number <span className="required">*</span>
                 </label>
                 <input
                   className="form-input"
@@ -945,7 +838,6 @@ const Billing = () => {
                   id="customer-phone"
                   type="tel"
                 />
-                <div className="form-hint">Used for WhatsApp invoice delivery (Stage 3)</div>
               </div>
             </div>
           </div>
@@ -976,6 +868,25 @@ const Billing = () => {
                   <span style={{ padding: '0 8px', fontWeight: 700, color: 'var(--text-muted)', fontSize: 14, borderLeft: '1.5px solid var(--border)' }}>%</span>
                 </div>
               </div>
+
+              {/* Manual Discount (₹) */}
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  Manual Discount (₹)
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 0, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', background: 'white' }}>
+                  <span style={{ padding: '0 10px', fontWeight: 700, color: 'var(--text-muted)', fontSize: 14, background: '#f9fafb', borderRight: '1.5px solid var(--border)' }}>₹</span>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Enter amount"
+                    value={manualDiscountAmt}
+                    onChange={e => setManualDiscountAmt(e.target.value < 0 ? '' : e.target.value)}
+                    style={{ width: '100%', border: 'none', padding: '6px 10px', fontWeight: 700, fontSize: 14, fontFamily: 'inherit', outline: 'none' }}
+                    id="manual-discount-input"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -986,8 +897,10 @@ const Billing = () => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
                 {[
                   ['Subtotal', INR(totals.subtotal)],
-                  discountPct > 0 ? [`Discount (${discountPct}%)`, '- ' + INR(totals.discountAmount)] : null,
-                  ['Taxable Amount', INR(totals.taxableAmount)],
+                  totals.discountAmount > 0 ? [
+                    `Discount${discountPct > 0 && Number(manualDiscountAmt) > 0 ? ` (${discountPct}% + ₹${manualDiscountAmt})` : discountPct > 0 ? ` (${discountPct}%)` : ''}`,
+                    '- ' + INR(totals.discountAmount)
+                  ] : null,
                   ['GST', INR(totals.gstAmount)],
                 ].filter(Boolean).map(([label, value]) => (
                   <div key={label} style={{ display: 'flex', justifyContent: 'space-between' }}>

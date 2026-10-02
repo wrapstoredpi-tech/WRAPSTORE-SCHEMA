@@ -7,7 +7,6 @@ import {
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { downloadInvoicePDF, printInvoicePDF } from '../lib/invoicePdf'
-import { retryWhatsAppDelivery } from '../services/whatsappService'
 
 const INR = (v) => '₹' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -28,7 +27,6 @@ const InvoiceModal = ({ invoice, onClose, onInvoiceUpdated }) => {
   const [loading, setLoading] = useState(true)
   const [actioning, setActioning] = useState(null)
   const [currentInv, setCurrentInv] = useState(invoice)
-  const [retryingWa, setRetryingWa] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -60,44 +58,9 @@ const InvoiceModal = ({ invoice, onClose, onInvoiceUpdated }) => {
     setActioning(null)
   }
 
-  const handleWhatsAppAction = async () => {
-    setRetryingWa(true)
-    try {
-      const res = await retryWhatsAppDelivery(currentInv)
-      if (res.success) {
-        const updated = {
-          ...currentInv,
-          whatsapp_status: 'SENT',
-          whatsapp_sent_at: new Date().toISOString(),
-          whatsapp_error: null,
-        }
-        setCurrentInv(updated)
-        onInvoiceUpdated?.(updated)
-        toast.success(`WhatsApp invoice delivered to ${currentInv.customer_phone}!`)
-      } else {
-        const updated = {
-          ...currentInv,
-          whatsapp_status: 'FAILED',
-          whatsapp_error: res.error || 'Delivery failed',
-        }
-        setCurrentInv(updated)
-        onInvoiceUpdated?.(updated)
-        toast.error('WhatsApp failed: ' + (res.error || 'Unable to deliver'))
-      }
-    } catch (err) {
-      toast.error('WhatsApp failed: ' + err.message)
-    }
-    setRetryingWa(false)
-  }
-
   const invoiceDate = new Date(currentInv.created_at)
   const dateStr = invoiceDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
   const timeStr = invoiceDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
-
-  const waSentDate = currentInv.whatsapp_sent_at
-    ? new Date(currentInv.whatsapp_sent_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) +
-      ' ' + new Date(currentInv.whatsapp_sent_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-    : null
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -108,13 +71,6 @@ const InvoiceModal = ({ invoice, onClose, onInvoiceUpdated }) => {
               <span className="modal-title">{currentInv.invoice_number}</span>
               <span className={`badge ${currentInv.payment_status === 'PAID' ? 'badge-success' : 'badge-warning'}`}>
                 {currentInv.payment_status}
-              </span>
-              <span className={`badge ${
-                currentInv.whatsapp_status === 'SENT' ? 'badge-success' :
-                currentInv.whatsapp_status === 'FAILED' ? 'badge-danger' : 'badge-warning'
-              }`} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <MessageCircle size={10} />
-                WhatsApp: {currentInv.whatsapp_status === 'SENT' ? 'Sent ✓' : currentInv.whatsapp_status === 'FAILED' ? 'Failed' : 'Pending'}
               </span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
@@ -142,62 +98,6 @@ const InvoiceModal = ({ invoice, onClose, onInvoiceUpdated }) => {
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{currentInv.payment_method} · <span style={{ color: 'var(--success)' }}>{currentInv.payment_status}</span></div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{dateStr} {timeStr}</div>
               </div>
-            </div>
-
-            {/* WhatsApp Integration Status Box */}
-            <div style={{
-              background: currentInv.whatsapp_status === 'SENT' ? '#ecfdf5' : currentInv.whatsapp_status === 'FAILED' ? '#fef2f2' : '#f0fdf4',
-              border: `1px solid ${currentInv.whatsapp_status === 'SENT' ? '#a7f3d0' : currentInv.whatsapp_status === 'FAILED' ? '#fecaca' : '#bbf7d0'}`,
-              borderRadius: 'var(--radius)',
-              padding: '12px 16px',
-              marginBottom: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: '50%',
-                  background: currentInv.whatsapp_status === 'SENT' ? '#d1fae5' : currentInv.whatsapp_status === 'FAILED' ? '#fee2e2' : '#dcfce7',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0
-                }}>
-                  <MessageCircle size={16} color={currentInv.whatsapp_status === 'SENT' ? '#10b981' : currentInv.whatsapp_status === 'FAILED' ? '#ef4444' : '#16a34a'} />
-                </div>
-                <div>
-                  <div style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: currentInv.whatsapp_status === 'SENT' ? '#065f46' : currentInv.whatsapp_status === 'FAILED' ? '#991b1b' : '#166534',
-                  }}>
-                    {currentInv.whatsapp_status === 'SENT' ? 'WhatsApp Invoice Delivered ✓' : currentInv.whatsapp_status === 'FAILED' ? 'WhatsApp Delivery Failed' : 'WhatsApp Delivery Pending'}
-                  </div>
-                  <div style={{
-                    fontSize: 11,
-                    color: currentInv.whatsapp_status === 'SENT' ? '#047857' : currentInv.whatsapp_status === 'FAILED' ? '#b91c1c' : '#15803d',
-                  }}>
-                    {currentInv.whatsapp_status === 'SENT'
-                      ? `Sent to ${currentInv.customer_phone}${waSentDate ? ` on ${waSentDate}` : ''}`
-                      : currentInv.whatsapp_status === 'FAILED'
-                      ? (currentInv.whatsapp_error || 'Delivery failed. Click Retry to resend.')
-                      : `Queued for dispatch to ${currentInv.customer_phone}`}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                className={`btn btn-sm ${currentInv.whatsapp_status === 'FAILED' ? 'btn-danger' : 'btn-secondary'}`}
-                style={{ fontSize: 11, padding: '5px 12px', flexShrink: 0 }}
-                onClick={handleWhatsAppAction}
-                disabled={retryingWa}
-              >
-                {retryingWa ? <><div className="btn-spinner" /> Sending...</> : currentInv.whatsapp_status === 'FAILED' ? 'Retry WhatsApp' : 'Resend WhatsApp'}
-              </button>
             </div>
 
             {/* Items Table */}
@@ -239,7 +139,6 @@ const InvoiceModal = ({ invoice, onClose, onInvoiceUpdated }) => {
                 {[
                   ['Subtotal', INR(currentInv.subtotal)],
                   currentInv.discount_amount > 0 ? ['Discount', '- ' + INR(currentInv.discount_amount)] : null,
-                  ['Taxable Amount', INR(currentInv.taxable_amount)],
                   ['GST', INR(currentInv.gst_amount)],
                 ].filter(Boolean).map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
@@ -262,17 +161,7 @@ const InvoiceModal = ({ invoice, onClose, onInvoiceUpdated }) => {
           </div>
         )}
 
-        <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
-          <div>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={handleWhatsAppAction}
-              disabled={retryingWa || loading}
-              style={{ color: '#047857' }}
-            >
-              <MessageCircle size={13} /> {currentInv.whatsapp_status === 'FAILED' ? 'Retry WhatsApp' : 'Resend WhatsApp'}
-            </button>
-          </div>
+        <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-secondary" onClick={onClose}>Close</button>
             <button className="btn btn-secondary" onClick={handleDownload} disabled={actioning === 'download' || loading}>
@@ -296,7 +185,6 @@ const Invoices = () => {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [paymentFilter, setPaymentFilter] = useState('')
-  const [waFilter, setWaFilter] = useState('')
   const [sortField, setSortField] = useState('created_at')
   const [sortDir, setSortDir] = useState('desc')
   const [selectedInvoice, setSelectedInvoice] = useState(null)
@@ -318,7 +206,6 @@ const Invoices = () => {
       query = query.or(`invoice_number.ilike.%${search}%,customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`)
     }
     if (paymentFilter) query = query.eq('payment_method', paymentFilter)
-    if (waFilter) query = query.eq('whatsapp_status', waFilter)
 
     query = query
       .order(sortField, { ascending: sortDir === 'asc' })
@@ -330,7 +217,7 @@ const Invoices = () => {
     setLoading(false)
   }
 
-  useEffect(() => { fetchInvoices() }, [search, paymentFilter, waFilter, sortField, sortDir, page])
+  useEffect(() => { fetchInvoices() }, [search, paymentFilter, sortField, sortDir, page])
 
   const handleSort = (field) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -348,31 +235,6 @@ const Invoices = () => {
       if (type === 'download') toast.success('PDF downloaded!')
     } catch (e) {
       toast.error('PDF failed: ' + e.message)
-    }
-    setActioning(null)
-  }
-
-  const handleQuickWhatsApp = async (invoice) => {
-    setActioning(invoice.id + '-wa')
-    try {
-      const res = await retryWhatsAppDelivery(invoice)
-      if (res.success) {
-        toast.success(`WhatsApp sent to ${invoice.customer_phone}!`)
-        setInvoices(prev => prev.map(inv =>
-          inv.id === invoice.id
-            ? { ...inv, whatsapp_status: 'SENT', whatsapp_sent_at: new Date().toISOString(), whatsapp_error: null }
-            : inv
-        ))
-      } else {
-        toast.error('WhatsApp failed: ' + (res.error || 'Delivery failed'))
-        setInvoices(prev => prev.map(inv =>
-          inv.id === invoice.id
-            ? { ...inv, whatsapp_status: 'FAILED', whatsapp_error: res.error }
-            : inv
-        ))
-      }
-    } catch (err) {
-      toast.error('WhatsApp failed: ' + err.message)
     }
     setActioning(null)
   }
@@ -418,12 +280,6 @@ const Invoices = () => {
           <option value="Card">Card</option>
           <option value="Other">Other</option>
         </select>
-        <select className="filter-select" value={waFilter} onChange={e => { setWaFilter(e.target.value); setPage(1) }}>
-          <option value="">All WhatsApp</option>
-          <option value="SENT">WhatsApp: Sent</option>
-          <option value="FAILED">WhatsApp: Failed</option>
-          <option value="PENDING">WhatsApp: Pending</option>
-        </select>
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -456,8 +312,7 @@ const Invoices = () => {
                     </th>
                     <th>Payment</th>
                     <th>Invoice Status</th>
-                    <th>WhatsApp Status</th>
-                    <th style={{ width: 170 }}>Actions</th>
+                    <th style={{ width: 130 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -487,31 +342,6 @@ const Invoices = () => {
                         </span>
                       </td>
                       <td>
-                        {inv.whatsapp_status === 'SENT' ? (
-                          <span className="badge badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <CheckCircle2 size={10} /> WhatsApp: Sent ✓
-                          </span>
-                        ) : inv.whatsapp_status === 'FAILED' ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span className="badge badge-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              <AlertCircle size={10} /> WhatsApp: Failed
-                            </span>
-                            <button
-                              className="btn btn-danger btn-xs"
-                              style={{ fontSize: 10, padding: '2px 6px' }}
-                              onClick={() => handleQuickWhatsApp(inv)}
-                              disabled={actioning === inv.id + '-wa'}
-                            >
-                              {actioning === inv.id + '-wa' ? '...' : 'Retry'}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <MessageCircle size={10} /> WhatsApp: Pending
-                          </span>
-                        )}
-                      </td>
-                      <td>
                         <div className="table-actions">
                           <button
                             className="btn btn-ghost btn-icon btn-sm"
@@ -535,15 +365,6 @@ const Invoices = () => {
                             title="Download PDF"
                           >
                             {actioning === inv.id + '-download' ? <div className="spinner-sm" /> : <Download size={13} />}
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-icon btn-sm"
-                            onClick={() => handleQuickWhatsApp(inv)}
-                            disabled={actioning === inv.id + '-wa'}
-                            title={inv.whatsapp_status === 'FAILED' ? 'Retry WhatsApp Delivery' : 'Send via WhatsApp'}
-                            style={{ color: inv.whatsapp_status === 'SENT' ? '#10b981' : inv.whatsapp_status === 'FAILED' ? '#ef4444' : '#6b7280' }}
-                          >
-                            {actioning === inv.id + '-wa' ? <div className="spinner-sm" /> : <MessageCircle size={13} />}
                           </button>
                         </div>
                       </td>
