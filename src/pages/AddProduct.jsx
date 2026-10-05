@@ -786,24 +786,51 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                 {errors.product_type && <div className="form-error">{errors.product_type}</div>}
               </div>
 
-              {/* Brand Compatibility */}
-              <div className="form-group" style={{ marginBottom: '24px' }}>
-                <label className="form-label">Brand Compatibility</label>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {['Apple', 'Samsung', 'Universal'].map(b => (
-                    <button
-                      key={b}
-                      type="button"
-                      className={`btn btn-sm ${form.mobile_brand === b ? 'btn-primary' : 'btn-secondary'}`}
-                      style={{ padding: '6px 12px', fontSize: '12px' }}
-                      onClick={() => {
-                        set('mobile_brand', b)
-                        setSelectedModels([])
-                      }}
-                    >
-                      {b}
-                    </button>
-                  ))}
+              {/* Brand Compatibility & Category / Subcategory */}
+              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: '24px' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Brand Compatibility</label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {['Apple', 'Samsung', 'Universal'].map(b => (
+                      <button
+                        key={b}
+                        type="button"
+                        className={`btn btn-sm ${form.mobile_brand === b ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ padding: '6px 12px', fontSize: '12px' }}
+                        onClick={() => {
+                          set('mobile_brand', b)
+                          setSelectedModels([])
+                        }}
+                      >
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ flex: '1 1 200px', marginBottom: 0 }}>
+                  <label className="form-label">Category</label>
+                  <select
+                    className="form-select"
+                    value={form.category_id}
+                    onChange={e => { set('category_id', e.target.value); set('subcategory_id', '') }}
+                  >
+                    <option value="">Select category...</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ flex: '1 1 200px', marginBottom: 0 }}>
+                  <label className="form-label">Subcategory</label>
+                  <select
+                    className="form-select"
+                    value={form.subcategory_id}
+                    onChange={e => set('subcategory_id', e.target.value)}
+                    disabled={!form.category_id || subcategories.length === 0}
+                  >
+                    <option value="">Select subcategory...</option>
+                    {subcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
                 </div>
               </div>
 
@@ -1400,37 +1427,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
             </div>
           </div>
 
-          {/* Category */}
-          <div className="card">
-            <div className="card-header"><span className="card-title">Category</span></div>
-            <div className="card-body">
-              <div className="form-row">
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Category</label>
-                  <select
-                    className="form-select"
-                    value={form.category_id}
-                    onChange={e => { set('category_id', e.target.value); set('subcategory_id', '') }}
-                  >
-                    <option value="">Select category...</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Subcategory</label>
-                  <select
-                    className="form-select"
-                    value={form.subcategory_id}
-                    onChange={e => set('subcategory_id', e.target.value)}
-                    disabled={!form.category_id || subcategories.length === 0}
-                  >
-                    <option value="">Select subcategory...</option>
-                    {subcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* Bottom Action Bar: Approval Info & Submit Button */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
