@@ -81,7 +81,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   const [variantDraft, setVariantDraft] = useState({
     name: '',
     description: '',
-    purchase_price: '',
+    purchase_price: '0',
     mrp: '',
     selling_price: '',
     quantity: '',
@@ -110,7 +110,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   }
 
   const handleAddOrUpdateVariant = () => {
-    if (!variantDraft.name.trim() && !variantDraft.purchase_price && !variantDraft.selling_price) {
+    if (!variantDraft.name.trim() && !variantDraft.selling_price && !variantDraft.mrp) {
       toast.error('Please enter variant details before adding.')
       return
     }
@@ -124,6 +124,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       const newVar = {
         ...variantDraft,
         color: assignedColor,
+        purchase_price: '0',
         id: `variant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         name: variantDraft.name.trim() || (assignedColor ? `${form.name || 'Silicon Case'} - ${assignedColor}` : `Variant ${variantsList.length + 1}`),
       }
@@ -134,7 +135,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     setVariantDraft({
       name: '',
       description: '',
-      purchase_price: '',
+      purchase_price: '0',
       mrp: '',
       selling_price: '',
       quantity: '',
@@ -402,23 +403,15 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       const img = targetImages[i]
       const isPrimary = img.isPrimary || i === 0
 
+      // Skip existing images that are already uploaded and saved in database
       if (img.existing) {
-        results.push({
-          product_id: productUuid,
-          storage_path: '',
-          public_url: img.preview,
-          is_primary: isPrimary,
-          sort_order: i,
-          file_name: 'existing-image.png',
-          file_size: 0,
-        })
         continue
       }
 
-      const ext = (img.file?.name || 'image.png').split('.').pop()
-      const path = `products/${productUuid}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-
       if (img.file) {
+        const ext = (img.file.name || 'image.png').split('.').pop()
+        const path = `products/${productUuid}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+
         const { error: uploadErr } = await supabase.storage
           .from('product-images')
           .upload(path, img.file, { contentType: img.file.type || 'image/jpeg', cacheControl: '3600', upsert: false })
@@ -438,16 +431,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           sort_order: i,
           file_name: img.file.name,
           file_size: img.file.size,
-        })
-      } else if (img.preview && !img.preview.startsWith('data:image/')) {
-        results.push({
-          product_id: productUuid,
-          storage_path: path,
-          public_url: img.preview,
-          is_primary: isPrimary,
-          sort_order: i,
-          file_name: 'product-image.png',
-          file_size: 0,
         })
       }
     }
@@ -573,7 +556,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       // Iterate through variants and create EACH variant as a single standalone product
       for (let i = 0; i < effectiveVariants.length; i++) {
         const v = effectiveVariants[i]
-        const purchasePrice = Number(v.purchase_price || 0)
+        const purchasePrice = 0
         const sellingPrice = Number(v.selling_price || 0)
         const mrpPrice = Number(v.mrp || 0)
         const quantity = Number(v.quantity || 0)
@@ -598,7 +581,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           mobile_model: selectedModels.length > 0 ? selectedModels.join(', ') : (form.mobile_model || null),
           color_variants: variantColor,
           description: v.description || form.description || null,
-          purchase_price: purchasePrice,
+          purchase_price: 0,
           selling_price: sellingPrice,
           mrp: mrpPrice,
           discount_percentage: Number(form.discount_percentage) || 0,
@@ -686,15 +669,32 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         const targetImgs = (v.images && v.images.length > 0) ? v.images : images
         if (targetImgs && targetImgs.length > 0 && productUuid) {
           setUploadingImages(true)
-          const imageRecords = await uploadImages(productUuid, targetImgs)
-          if (imageRecords.length > 0) {
-            await supabase.from('product_images').insert(imageRecords)
+
+          // If updating an existing product, clean up removed image rows if any were deleted
+          if (targetId) {
+            const keepImageIds = targetImgs.filter(img => img.existing && img.id).map(img => img.id)
+            const keepUrls = targetImgs.filter(img => img.existing && img.preview).map(img => img.preview)
+
+            const { data: existingDbImages } = await supabase.from('product_images').select('id, public_url').eq('product_id', productUuid)
+            if (existingDbImages && existingDbImages.length > 0) {
+              const toRemove = existingDbImages.filter(dbImg => !keepImageIds.includes(dbImg.id) && !keepUrls.includes(dbImg.public_url))
+              if (toRemove.length > 0) {
+                const removeIds = toRemove.map(r => r.id)
+                await supabase.from('product_images').delete().in('id', removeIds)
+              }
+            }
+          }
+
+          // Upload only newly added images
+          const newImageRecords = await uploadImages(productUuid, targetImgs)
+          if (newImageRecords.length > 0) {
+            await supabase.from('product_images').insert(newImageRecords)
             // Attach to local product record if local fallback was used
             if (isLocalFallback) {
               const localProds = getLocalProducts()
               const idx = localProds.findIndex(p => p.id === productUuid)
               if (idx !== -1) {
-                localProds[idx].product_images = imageRecords
+                localProds[idx].product_images = [...(localProds[idx].product_images || []), ...newImageRecords]
                 localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(localProds))
               }
             }
@@ -1210,21 +1210,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                   </div>
                 </div>
 
-                {/* Purchase Price, MRP, Selling Price Row */}
+                {/* MRP & Selling Price Row */}
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                  <div className="form-group" style={{ flex: '1 1 140px', marginBottom: 0 }}>
-                    <label className="form-label">Purchase Price</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="form-input"
-                      placeholder="0.00"
-                      value={variantDraft.purchase_price}
-                      onChange={e => setVariantDraft(prev => ({ ...prev, purchase_price: e.target.value }))}
-                    />
-                  </div>
-                  <div className="form-group" style={{ flex: '1 1 140px', marginBottom: 0 }}>
+                  <div className="form-group" style={{ flex: '1 1 180px', marginBottom: 0 }}>
                     <label className="form-label">MRP</label>
                     <input
                       type="number"
@@ -1236,7 +1224,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                       onChange={e => setVariantDraft(prev => ({ ...prev, mrp: e.target.value }))}
                     />
                   </div>
-                  <div className="form-group" style={{ flex: '1 1 140px', marginBottom: 0 }}>
+                  <div className="form-group" style={{ flex: '1 1 180px', marginBottom: 0 }}>
                     <label className="form-label">Selling Price</label>
                     <input
                       type="number"
@@ -1304,7 +1292,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                         <th style={{ padding: '12px 14px' }}>Product Image</th>
                         <th style={{ padding: '12px 14px' }}>Product Name</th>
                         <th style={{ padding: '12px 14px' }}>Colour Variant</th>
-                        <th style={{ padding: '12px 14px' }}>Purchase Price</th>
                         <th style={{ padding: '12px 14px' }}>MRP</th>
                         <th style={{ padding: '12px 14px' }}>Selling Price</th>
                         <th style={{ padding: '12px 14px' }}>Quantity</th>
@@ -1314,7 +1301,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                     <tbody>
                       {variantsList.length === 0 ? (
                         <tr>
-                          <td colSpan={8} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                          <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
                             No product variants added yet. Add a variant above to configure products.
                           </td>
                         </tr>
@@ -1349,9 +1336,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                               <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', background: '#f3f4f6', color: '#111827', fontWeight: 700, border: '1px solid #e5e7eb' }}>
                                 {variant.color || (selectedColors.length > idx ? selectedColors[idx] : '—')}
                               </span>
-                            </td>
-                            <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
-                              ₹{Number(variant.purchase_price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </td>
                             <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
                               ₹{Number(variant.mrp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
