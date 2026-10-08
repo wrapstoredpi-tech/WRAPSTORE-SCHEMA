@@ -132,7 +132,33 @@ const ProductApproval = () => {
     if (error) {
       console.warn('DB approve update error:', error.message)
     }
-    toast.success('Product approved!')
+
+    // Record initial stock movement upon approval so inventory values and movement logs update
+    try {
+      const { data: targetProd } = await supabase.from('products').select('*').eq('id', productId).maybeSingle()
+      const prodObj = targetProd || getLocalProducts().find(p => p.id === productId)
+
+      if (prodObj && Number(prodObj.current_stock) > 0) {
+        const movementPayload = {
+          product_id: productId,
+          movement_type: 'INITIAL_STOCK',
+          quantity: Number(prodObj.current_stock),
+          previous_stock: 0,
+          new_stock: Number(prodObj.current_stock),
+          reason: 'Initial stock on product approval',
+        }
+        if (validApprovedBy) movementPayload.performed_by = validApprovedBy
+        const movementRes = await supabase.from('inventory_movements').insert(movementPayload)
+        if (movementRes.error && movementPayload.performed_by) {
+          delete movementPayload.performed_by
+          await supabase.from('inventory_movements').insert(movementPayload)
+        }
+      }
+    } catch (invErr) {
+      console.warn('Inventory movement record on approval note:', invErr)
+    }
+
+    toast.success('Product approved successfully!')
 
     fetchPending()
     setProcessing(null)
@@ -359,6 +385,15 @@ const ProductApproval = () => {
                       <div>{p.mobile_brand || 'Universal'}</div>
                       <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{p.mobile_model || 'All models'}</div>
                     </div>
+
+                    {p.collection && (
+                      <div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                          Collection
+                        </div>
+                        <div>{p.collection}</div>
+                      </div>
+                    )}
 
                     <div>
                       <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>

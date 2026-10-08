@@ -79,7 +79,7 @@ const Products = () => {
       .eq('is_active', true)
 
     if (search) {
-      query = query.or(`name.ilike.%${search}%,product_id.ilike.%${search}%,mobile_model.ilike.%${search}%,mobile_brand.ilike.%${search}%,color_variants.ilike.%${search}%`)
+      query = query.or(`name.ilike.%${search}%,product_id.ilike.%${search}%,mobile_model.ilike.%${search}%,mobile_brand.ilike.%${search}%,color_variants.ilike.%${search}%,collection.ilike.%${search}%`)
     }
     if (typeFilter) {
       query = query.or(`category_id.eq.${typeFilter},product_type.eq.${typeFilter}`)
@@ -90,11 +90,77 @@ const Products = () => {
       .order(sortField, { ascending: sortDir === 'asc' })
       .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1)
 
-    const { data, count, error } = await query
-    const dbProds = data || []
-    const localProds = getLocalProducts().filter(p => p.is_active !== false)
+    // Separate Accessories query from new accessories tables
+    let accQuery = supabase
+      .from('accessories')
+      .select(`
+        *,
+        categories(name),
+        subcategories(name),
+        accessory_variants(
+          id,
+          sku,
+          variant_name,
+          description,
+          attributes,
+          mrp,
+          selling_price,
+          quantity,
+          is_active,
+          accessory_variant_images(image_url, is_primary)
+        ),
+        accessory_compatible_models(
+          mobile_models(model_name)
+        )
+      `)
+      .eq('is_active', true)
 
-    const merged = [...dbProds]
+    if (search) {
+      accQuery = accQuery.or(`product_name.ilike.%${search}%,product_id.ilike.%${search}%,brand_name.ilike.%${search}%`)
+    }
+    if (typeFilter) {
+      accQuery = accQuery.eq('category_id', typeFilter)
+    }
+
+    const [prodRes, accRes] = await Promise.all([query, accQuery])
+
+    const dbProds = prodRes.data || []
+    const accData = accRes.data || []
+
+    const accProds = accData.map(acc => {
+      const models = acc.accessory_compatible_models?.map(m => m.mobile_models?.model_name).filter(Boolean) || []
+      const primaryVar = acc.accessory_variants?.[0]
+      const images = acc.accessory_variants?.flatMap(v => v.accessory_variant_images?.map(img => ({ public_url: img.image_url, is_primary: img.is_primary })) || []) || []
+
+      return {
+        id: acc.id,
+        product_id: acc.product_id || `WS-ACC-${acc.id.slice(0, 6)}`,
+        name: acc.product_name,
+        product_type: 'accessories',
+        category_id: acc.category_id,
+        subcategory_id: acc.subcategory_id,
+        categories: acc.categories,
+        subcategories: acc.subcategories,
+        mobile_brand: acc.brand_name || (acc.compatibility_type ? acc.compatibility_type.toUpperCase() : 'Universal'),
+        mobile_model: models.length > 0 ? models.join(', ') : 'Universal',
+        color_variants: acc.accessory_variants?.map(v => v.attributes?.color || v.variant_name).join(', ') || '',
+        selling_price: primaryVar?.selling_price || 0,
+        mrp: primaryVar?.mrp || 0,
+        current_stock: acc.accessory_variants?.reduce((sum, v) => sum + (v.quantity || 0), 0) || 0,
+        min_stock_level: 5,
+        approval_status: 'APPROVED',
+        product_images: images,
+        isAccessoryTableItem: true,
+      }
+    })
+
+    const localProds = getLocalProducts().filter(p => {
+      if (p.is_active === false) return false
+      if (statusFilter) return p.approval_status === statusFilter
+      return p.approval_status === 'APPROVED' || !p.approval_status
+    })
+
+    const merged = [...accProds, ...dbProds]
     for (const lp of localProds) {
       if (!merged.some(p => p.id === lp.id || p.name.toLowerCase() === lp.name.toLowerCase())) {
         merged.unshift(lp)
@@ -102,7 +168,7 @@ const Products = () => {
     }
 
     setProducts(merged)
-    setTotal((count || 0) + localProds.filter(lp => !dbProds.some(p => p.id === lp.id)).length)
+    setTotal((prodRes.count || 0) + accProds.length + localProds.filter(lp => !dbProds.some(p => p.id === lp.id)).length)
     setLoading(false)
   }
 
@@ -135,6 +201,15 @@ const Products = () => {
       if (typeof deleteId === 'string' && deleteId.startsWith('prod-local-')) {
         removeLocalFallback(deleteId)
         toast.success('Product deleted successfully.')
+        setDeleteId(null)
+        fetchProducts()
+        return
+      }
+
+      // Check if deleteId is in accessories table
+      const { data: accDeleted } = await supabase.from('accessories').delete().eq('id', deleteId).select()
+      if (accDeleted && accDeleted.length > 0) {
+        toast.success('Accessories product deleted successfully.')
         setDeleteId(null)
         fetchProducts()
         return

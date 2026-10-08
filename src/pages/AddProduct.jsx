@@ -30,6 +30,22 @@ const IPHONE_SERIES = [
   { label: 'iPhone 13 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 13')) },
 ]
 
+const IPAD_MODELS = [
+  'iPad Pro 13" (M4)', 'iPad Pro 12.9" (6th Gen)', 'iPad Pro 12.9" (5th Gen)', 'iPad Pro 12.9" (4th Gen)', 'iPad Pro 12.9" (3rd Gen)',
+  'iPad Pro 11" (M4)', 'iPad Pro 11" (4th Gen)', 'iPad Pro 11" (3rd Gen)', 'iPad Pro 11" (2nd Gen)', 'iPad Pro 11" (1st Gen)',
+  'iPad Air 13" (M2)', 'iPad Air 11" (M2)', 'iPad Air (5th Gen 10.9")', 'iPad Air (4th Gen 10.9")', 'iPad Air (3rd Gen 10.5")',
+  'iPad Mini (A17 Pro)', 'iPad Mini (6th Gen 8.3")', 'iPad Mini (5th Gen)',
+  'iPad (10th Gen 10.9")', 'iPad (9th Gen 10.2")', 'iPad (8th Gen 10.2")', 'iPad (7th Gen 10.2")', 'iPad (6th Gen 9.7")',
+]
+
+const IPAD_SERIES = [
+  { label: 'All iPad Models', filter: () => IPAD_MODELS },
+  { label: 'iPad Pro Series', filter: () => IPAD_MODELS.filter(m => m.includes('iPad Pro')) },
+  { label: 'iPad Air Series', filter: () => IPAD_MODELS.filter(m => m.includes('iPad Air')) },
+  { label: 'iPad Mini Series', filter: () => IPAD_MODELS.filter(m => m.includes('iPad Mini')) },
+  { label: 'iPad Standard Series', filter: () => IPAD_MODELS.filter(m => m.startsWith('iPad (')) },
+]
+
 const SAMSUNG_MODELS = [
   'Samsung Galaxy S25 Ultra', 'Samsung Galaxy S25+', 'Samsung Galaxy S25',
   'Samsung Galaxy S24 Ultra', 'Samsung Galaxy S24+', 'Samsung Galaxy S24',
@@ -53,6 +69,29 @@ const DEFAULT_CATEGORIES = [
 
 const DEFAULT_GENERIC_COLORS = ['Black', 'White', 'Clear', 'Blue', 'Red', 'Purple']
 
+const TARGET_COLOUR_SUBCATEGORIES = [
+  'power bank',
+  'watch strap',
+  'ipad case',
+  'cables',
+  'cable',
+  'airpods cases',
+  'airpods case',
+  'wallet',
+  'watch cases',
+  'watch case',
+  'phone stand',
+  'adapters',
+  'adapter',
+  'lens protector',
+]
+
+const isColourVariantSubcategory = (subcatName) => {
+  if (!subcatName || typeof subcatName !== 'string') return false
+  const nameLower = subcatName.toLowerCase().trim()
+  return TARGET_COLOUR_SUBCATEGORIES.some(target => nameLower.includes(target) || target.includes(nameLower))
+}
+
 const parseModels = (val) => {
   if (!val) return []
   if (Array.isArray(val)) return val
@@ -75,11 +114,16 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   const fileRef = useRef()
   const variantFileRef = useRef()
 
+  // Tempered Glass Variant State
+  const [temperedBorder, setTemperedBorder] = useState('Border')
+  const [temperedPrivacy, setTemperedPrivacy] = useState('Normal')
+
   // Product Variants Builder State
   const [variantsList, setVariantsList] = useState([])
   const [editingVariantId, setEditingVariantId] = useState(null)
   const [variantDraft, setVariantDraft] = useState({
     name: '',
+    brand_name: '',
     description: '',
     purchase_price: '0',
     mrp: '',
@@ -115,18 +159,23 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       return
     }
 
+    const temperedVariantName = `${temperedBorder} - ${temperedPrivacy}`
+    const assignedColor = isTemperedGlass
+      ? temperedVariantName
+      : (shouldShowColourVariants ? (variantDraft.color || (selectedColors.length > variantsList.length ? selectedColors[variantsList.length] : selectedColors[0] || '')) : null)
+
     if (editingVariantId) {
-      setVariantsList(prev => prev.map(v => v.id === editingVariantId ? { ...variantDraft, id: editingVariantId } : v))
+      setVariantsList(prev => prev.map(v => v.id === editingVariantId ? { ...variantDraft, color: assignedColor, id: editingVariantId } : v))
       setEditingVariantId(null)
       toast.success('Product variant updated!')
     } else {
-      const assignedColor = variantDraft.color || (selectedColors.length > variantsList.length ? selectedColors[variantsList.length] : selectedColors[0] || '')
+      const defaultProdTitle = form.name && form.name.trim() ? form.name.trim() : (isTemperedGlass ? 'Tempered Glass' : 'Product')
       const newVar = {
         ...variantDraft,
         color: assignedColor,
         purchase_price: '0',
         id: `variant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        name: variantDraft.name.trim() || (assignedColor ? `${form.name || 'Silicon Case'} - ${assignedColor}` : `Variant ${variantsList.length + 1}`),
+        name: variantDraft.name.trim() || (assignedColor ? `${defaultProdTitle} - ${assignedColor}` : `${defaultProdTitle} ${variantsList.length + 1}`),
       }
       setVariantsList(prev => [...prev, newVar])
       toast.success('Product variant added!')
@@ -134,6 +183,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
     setVariantDraft({
       name: '',
+      brand_name: '',
       description: '',
       purchase_price: '0',
       mrp: '',
@@ -147,6 +197,14 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   const handleEditVariant = (variant) => {
     setEditingVariantId(variant.id)
     setVariantDraft({ ...variant })
+    if (isTemperedGlass && variant.color) {
+      if (variant.color.includes('Borderless')) setTemperedBorder('Borderless')
+      else if (variant.color.includes('Border')) setTemperedBorder('Border')
+
+      if (variant.color.includes('360 Degree privacy')) setTemperedPrivacy('360 Degree privacy')
+      else if (variant.color.includes('Matte Privacy')) setTemperedPrivacy('Matte Privacy')
+      else if (variant.color.includes('Normal')) setTemperedPrivacy('Normal')
+    }
   }
 
   const handleDeleteVariant = (variantId) => {
@@ -173,6 +231,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     subcategory_id: '',
     mobile_brand: '',
     mobile_model: '',
+    collection: '',
     description: '',
     selling_price: '',
     gst_percentage: '18',
@@ -220,17 +279,42 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
   const activeCategories = categories.length > 0 ? categories : DEFAULT_CATEGORIES
 
-  const modelOptions = form.mobile_brand === 'Apple' || form.product_type === 'iphone_case'
-    ? IPHONE_MODELS
-    : form.mobile_brand === 'Samsung' || form.product_type === 'samsung_case'
-    ? SAMSUNG_MODELS
-    : []
+  const selectedCatObj = categories.find(c => c.id === form.category_id || c.slug === form.product_type)
+  const categoryName = selectedCatObj?.name || form.product_type || ''
 
-  const seriesOptions = form.mobile_brand === 'Apple' || form.product_type === 'iphone_case'
-    ? IPHONE_SERIES
-    : form.mobile_brand === 'Samsung' || form.product_type === 'samsung_case'
-    ? SAMSUNG_SERIES
-    : []
+  const selectedSubcatObj = subcategories.find(s => s.id === form.subcategory_id)
+  const selectedSubcatName = selectedSubcatObj?.name || (typeof form.subcategory_id === 'string' ? form.subcategory_id : '')
+
+  const isTemperedGlass = /tempered/i.test(selectedSubcatName) || selectedSubcatName.toLowerCase().includes('tempered glass')
+  const isIpadCategory = /ipad/i.test(selectedSubcatName) || /ipad/i.test(form.product_type || '') || /ipad/i.test(form.name || '')
+  const isMobileCase = (/mobile case|cases/i.test(categoryName) || form.product_type === 'iphone_case' || form.product_type === 'samsung_case') && !isIpadCategory
+  const isMobileAccessoryWithModels = /lens|tempered/i.test(selectedSubcatName)
+  const isAccessoriesCategory = categoryName.toLowerCase().includes('access') || form.product_type === 'accessories' || form.product_type === 'gadgets' || !isMobileCase
+  const shouldShowColourVariants = isMobileCase || isColourVariantSubcategory(selectedSubcatName)
+
+  const shouldShowModelSelection = isMobileCase || isIpadCategory || isMobileAccessoryWithModels
+
+  useEffect(() => {
+    if (isIpadCategory && form.mobile_brand === 'Universal') {
+      setForm(prev => ({ ...prev, mobile_brand: 'Apple' }))
+    }
+  }, [form.subcategory_id, isIpadCategory])
+
+  const modelOptions = isIpadCategory
+    ? IPAD_MODELS
+    : (form.mobile_brand === 'Apple' || form.product_type === 'iphone_case'
+      ? IPHONE_MODELS
+      : form.mobile_brand === 'Samsung' || form.product_type === 'samsung_case'
+      ? SAMSUNG_MODELS
+      : [])
+
+  const seriesOptions = isIpadCategory
+    ? IPAD_SERIES
+    : (form.mobile_brand === 'Apple' || form.product_type === 'iphone_case'
+      ? IPHONE_SERIES
+      : form.mobile_brand === 'Samsung' || form.product_type === 'samsung_case'
+      ? SAMSUNG_SERIES
+      : [])
 
   const [selectedModels, setSelectedModels] = useState(() => parseModels(prefillData?.mobile_model))
   const [modelSearch, setModelSearch] = useState('')
@@ -253,93 +337,200 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       setSelectedColors(prefilledColors)
       setAvailableColors(prev => Array.from(new Set([...prev, ...prefilledColors])))
 
-      const initialVariant = {
-        id: `variant-existing-${prefillData.id || Date.now()}`,
-        name: prefillData.name || '',
-        description: prefillData.description || '',
-        purchase_price: prefillData.purchase_price?.toString() || '',
-        mrp: mrpValue ? mrpValue.toString() : '',
-        selling_price: prefillData.selling_price?.toString() || '',
-        quantity: (prefillData.current_stock ?? prefillData.initial_stock)?.toString() || '',
-        color: colorVal,
-        images: (prefillData.product_images || []).map(img => ({
-          id: img.id,
-          preview: img.public_url || img.preview,
-          existing: true,
-        })),
+      if (prefillData.mobile_model) {
+        setSelectedModels(parseModels(prefillData.mobile_model))
       }
 
-      setVariantDraft({ ...initialVariant })
-      setVariantsList([initialVariant])
+      if (prefillData.accessory_variants && prefillData.accessory_variants.length > 0) {
+        const mappedVars = prefillData.accessory_variants.map(v => ({
+          id: v.id,
+          name: v.variant_name || '',
+          brand_name: prefillData.brand_name || '',
+          description: v.description || '',
+          purchase_price: '0',
+          mrp: v.mrp?.toString() || '0',
+          selling_price: v.selling_price?.toString() || '0',
+          quantity: v.quantity?.toString() || '0',
+          color: v.attributes?.color || v.variant_name,
+          images: (v.accessory_variant_images || []).map(img => ({
+            id: img.id,
+            preview: img.image_url,
+            existing: true,
+          })),
+        }))
+        setVariantsList(mappedVars)
+        if (mappedVars[0]) setVariantDraft({ ...mappedVars[0] })
+      } else {
+        const initialVariant = {
+          id: `variant-existing-${prefillData.id || Date.now()}`,
+          name: prefillData.name || '',
+          description: prefillData.description || '',
+          purchase_price: prefillData.purchase_price?.toString() || '',
+          mrp: mrpValue ? mrpValue.toString() : '',
+          selling_price: prefillData.selling_price?.toString() || '',
+          quantity: (prefillData.current_stock ?? prefillData.initial_stock)?.toString() || '',
+          color: colorVal,
+          images: (prefillData.product_images || []).map(img => ({
+            id: img.id,
+            preview: img.public_url || img.preview,
+            existing: true,
+          })),
+        }
+
+        setVariantDraft({ ...initialVariant })
+        setVariantsList([initialVariant])
+      }
     }
   }, [prefillData])
 
-  // Fetch product for edit mode
+  // Fetch product for edit mode if prefillData was not passed directly
   useEffect(() => {
-    if (!productId) return
+    if (!productId || prefillData) return
     setIsLoading(true)
-    supabase
-      .from('products')
-      .select('*, product_images(*)')
-      .eq('id', productId)
-      .single()
-      .then(({ data, error }) => {
-        if (error || !data) {
-          toast.error('Product not found')
-          navigate('/products')
-          return
-        }
-        const mrpValue = getMrp(data)
-        const colorVal = data.color_variants || ''
+
+    const loadEditProduct = async () => {
+      // 1. Try Mobile Cases table
+      const { data: prodData } = await supabase
+        .from('products')
+        .select('*, product_images(*)')
+        .eq('id', productId)
+        .maybeSingle()
+
+      if (prodData) {
+        const mrpValue = getMrp(prodData)
+        const colorVal = prodData.color_variants || ''
         const colors = parseModels(colorVal)
 
         setForm({
-          name: data.name || '',
-          product_type: data.product_type || '',
-          category_id: data.category_id || '',
-          subcategory_id: data.subcategory_id || '',
-          mobile_brand: data.mobile_brand || '',
-          mobile_model: data.mobile_model || '',
-          description: data.description || '',
-          purchase_price: data.purchase_price?.toString() || '',
-          selling_price: data.selling_price?.toString() || '',
-          discount_percentage: data.discount_percentage?.toString() || '0',
-          gst_percentage: data.gst_percentage != null ? data.gst_percentage.toString() : '18',
-          initial_stock: data.current_stock?.toString() || '',
-          min_stock_level: data.min_stock_level?.toString() || '5',
+          name: prodData.name || '',
+          product_type: prodData.product_type || '',
+          category_id: prodData.category_id || '',
+          subcategory_id: prodData.subcategory_id || '',
+          mobile_brand: prodData.mobile_brand || '',
+          mobile_model: prodData.mobile_model || '',
+          collection: prodData.collection || '',
+          description: prodData.description || '',
+          purchase_price: prodData.purchase_price?.toString() || '',
+          selling_price: prodData.selling_price?.toString() || '',
+          discount_percentage: prodData.discount_percentage?.toString() || '0',
+          gst_percentage: prodData.gst_percentage != null ? prodData.gst_percentage.toString() : '18',
+          initial_stock: prodData.current_stock?.toString() || '',
+          min_stock_level: prodData.min_stock_level?.toString() || '5',
         })
-        setSelectedModels(parseModels(data.mobile_model))
+        setSelectedModels(parseModels(prodData.mobile_model))
         setSelectedColors(colors)
 
-        const mappedImages = (data.product_images || []).map(img => ({
+        const mappedImages = (prodData.product_images || []).map(img => ({
           id: img.id,
           preview: img.public_url,
           isPrimary: img.is_primary,
           existing: true,
         }))
 
-        if (mappedImages.length) {
-          setImages(mappedImages)
-        }
+        if (mappedImages.length) setImages(mappedImages)
 
         const initialVariant = {
-          id: `variant-existing-${data.id}`,
-          name: data.name || '',
-          description: data.description || '',
-          purchase_price: data.purchase_price?.toString() || '',
+          id: `variant-existing-${prodData.id}`,
+          name: prodData.name || '',
+          description: prodData.description || '',
+          purchase_price: prodData.purchase_price?.toString() || '',
           mrp: mrpValue ? mrpValue.toString() : '',
-          selling_price: data.selling_price?.toString() || '',
-          quantity: data.current_stock?.toString() || '',
+          selling_price: prodData.selling_price?.toString() || '',
+          quantity: prodData.current_stock?.toString() || '',
           color: colorVal,
           images: mappedImages,
         }
 
         setVariantDraft({ ...initialVariant })
         setVariantsList([initialVariant])
-
         setIsLoading(false)
+        return
+      }
+
+      // 2. Try Accessories table
+      const { data: accData, error: accError } = await supabase
+        .from('accessories')
+        .select(`
+          *,
+          categories(name),
+          subcategories(name),
+          accessory_variants(
+            *,
+            accessory_variant_images(*)
+          ),
+          accessory_compatible_models(
+            *,
+            mobile_models(model_name)
+          )
+        `)
+        .eq('id', productId)
+        .maybeSingle()
+
+      if (accError || !accData) {
+        toast.error('Product not found')
+        navigate('/products')
+        return
+      }
+
+      const models = accData.accessory_compatible_models?.map(m => m.mobile_models?.model_name).filter(Boolean) || []
+      const primaryVar = accData.accessory_variants?.[0]
+
+      setForm({
+        name: accData.product_name || '',
+        product_type: 'accessories',
+        category_id: accData.category_id || '',
+        subcategory_id: accData.subcategory_id || '',
+        mobile_brand: accData.compatibility_type ? accData.compatibility_type.charAt(0).toUpperCase() + accData.compatibility_type.slice(1) : 'Universal',
+        mobile_model: models.join(', '),
+        description: accData.description || '',
+        purchase_price: '0',
+        selling_price: primaryVar?.selling_price?.toString() || '0',
+        discount_percentage: '0',
+        gst_percentage: '18',
+        initial_stock: primaryVar?.quantity?.toString() || '0',
+        min_stock_level: '5',
       })
-  }, [productId, navigate])
+      setSelectedModels(models)
+
+      if (accData.brand_name) {
+        setVariantDraft(prev => ({ ...prev, brand_name: accData.brand_name }))
+      }
+
+      if (accData.accessory_variants && accData.accessory_variants.length > 0) {
+        const mappedVars = accData.accessory_variants.map(v => ({
+          id: v.id,
+          name: v.variant_name || '',
+          brand_name: accData.brand_name || '',
+          description: v.description || '',
+          purchase_price: '0',
+          mrp: v.mrp?.toString() || '0',
+          selling_price: v.selling_price?.toString() || '0',
+          quantity: v.quantity?.toString() || '0',
+          color: v.attributes?.color || v.variant_name,
+          images: (v.accessory_variant_images || []).map(img => ({
+            id: img.id,
+            preview: img.image_url,
+            existing: true,
+          })),
+        }))
+        setVariantsList(mappedVars)
+        if (mappedVars[0]) setVariantDraft({ ...mappedVars[0] })
+
+        const extractedColors = mappedVars.map(v => v.color).filter(Boolean)
+        if (extractedColors.length > 0) {
+          setSelectedColors(extractedColors)
+          setAvailableColors(prev => Array.from(new Set([...DEFAULT_GENERIC_COLORS, ...prev, ...extractedColors])))
+        }
+
+        const allImgs = mappedVars.flatMap(v => v.images)
+        if (allImgs.length > 0) setImages(allImgs)
+      }
+
+      setIsLoading(false)
+    }
+
+    loadEditProduct()
+  }, [productId, prefillData, navigate])
 
   const set = (field, value) => setForm(f => ({ ...f, [field]: value }))
 
@@ -455,8 +646,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         }
       }
     }
-    const requiresModel = (form.mobile_brand === 'Apple' || form.mobile_brand === 'Samsung') && modelOptions.length > 0
-    if (requiresModel && selectedModels.length === 0) e.mobile_model = 'Select at least one compatible mobile model'
+    const requiresModel = shouldShowModelSelection && (form.mobile_brand === 'Apple' || form.mobile_brand === 'Samsung') && modelOptions.length > 0
+    if (requiresModel && selectedModels.length === 0) e.mobile_model = 'Select at least one compatible model'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -469,14 +660,13 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     try {
       const resolveProductType = () => {
         const rawType = (form.product_type || '').toLowerCase()
+        if (isAccessoriesCategory || rawType.includes('access') || rawType === 'accessories') return 'accessories'
         if (['iphone_case', 'samsung_case', 'mobile_sticker'].includes(rawType)) return rawType
         if (rawType.includes('sticker')) return 'mobile_sticker'
         if (form.mobile_brand === 'Samsung') return 'samsung_case'
         if (form.mobile_brand === 'Apple') return 'iphone_case'
         return 'iphone_case'
       }
-
-      const colorsStr = selectedColors.length > 0 ? selectedColors.join(', ') : null
 
       const generateProductName = (varName = '') => {
         let baseName = form.name && form.name.trim() ? form.name.trim() : ''
@@ -523,6 +713,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         if (dbSub) resolvedSubcategoryId = dbSub.id
       }
 
+      // ============================================================
+      // EXISTING MOBILE CASES SAVE FLOW (UNTOUCHED & PRESERVED)
+      // ============================================================
       // Verify created_by ID against DB profiles table to prevent products_created_by_fkey error
       let validCreatedBy = null
       if (isValidUuid(user?.id)) {
@@ -577,9 +770,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           product_type: resolveProductType(),
           category_id: resolvedCategoryId,
           subcategory_id: resolvedSubcategoryId,
-          mobile_brand: form.mobile_brand || null,
+          mobile_brand: v.brand_name || form.mobile_brand || null,
           mobile_model: selectedModels.length > 0 ? selectedModels.join(', ') : (form.mobile_model || null),
           color_variants: variantColor,
+          collection: form.collection && form.collection.trim() ? form.collection.trim() : null,
           description: v.description || form.description || null,
           purchase_price: 0,
           selling_price: sellingPrice,
@@ -825,7 +1019,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                   <select
                     className="form-select"
                     value={form.subcategory_id}
-                    onChange={e => set('subcategory_id', e.target.value)}
+                    onChange={e => {
+                      set('subcategory_id', e.target.value)
+                      setSelectedModels([])
+                    }}
                     disabled={!form.category_id || subcategories.length === 0}
                   >
                     <option value="">Select subcategory...</option>
@@ -834,189 +1031,184 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                 </div>
               </div>
 
-              <hr style={{ margin: '24px 0', border: 'none', borderTop: '1px solid var(--border)' }} />
+              {/* Compatible Mobile / iPad Models */}
+              {shouldShowModelSelection && form.mobile_brand !== 'Universal' && modelOptions.length > 0 && (
+                <>
+                  <hr style={{ margin: '24px 0', border: 'none', borderTop: '1px solid var(--border)' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>
+                        {isIpadCategory ? 'Compatible iPad Models' : 'Compatible Mobile Models'} <span className="required">*</span>
+                      </label>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: selectedModels.length > 0 ? '#10b981' : 'var(--text-muted)' }}>
+                        {selectedModels.length} Selected
+                      </span>
+                    </div>
 
-              {/* Compatible Mobile Models */}
-              {form.mobile_brand !== 'Universal' && modelOptions.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <label className="form-label" style={{ marginBottom: 0 }}>
-                      Compatible Mobile Models <span className="required">*</span>
-                    </label>
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: selectedModels.length > 0 ? '#10b981' : 'var(--text-muted)' }}>
-                      {selectedModels.length} Selected
-                    </span>
-                  </div>
-
-                  <div style={{
-                    border: `1.5px solid ${errors.mobile_model ? 'var(--danger)' : 'var(--border-strong)'}`,
-                    borderRadius: 'var(--radius)',
-                    padding: '12px',
-                    background: '#fafafa',
-                  }}>
-                    {/* Quick Series Select Buttons */}
-                    <div style={{ marginBottom: '12px' }}>
-                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        Quick Series Select
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                        {seriesOptions.map((series, idx) => {
-                          const modelsInSeries = series.filter()
-                          const isFullySelected = modelsInSeries.length > 0 && modelsInSeries.every(m => selectedModels.includes(m))
-                          return (
+                    <div style={{
+                      border: `1.5px solid ${errors.mobile_model ? 'var(--danger)' : 'var(--border-strong)'}`,
+                      borderRadius: 'var(--radius)',
+                      padding: '12px',
+                      background: '#fafafa',
+                    }}>
+                      {/* Quick Series Select Buttons */}
+                      <div style={{ marginBottom: '12px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Quick Series Select
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          {seriesOptions.map((series, idx) => {
+                            const modelsInSeries = series.filter()
+                            const isFullySelected = modelsInSeries.length > 0 && modelsInSeries.every(m => selectedModels.includes(m))
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => handleSeriesToggle(series.filter)}
+                                style={{
+                                  fontSize: '11px',
+                                  padding: '4px 10px',
+                                  borderRadius: 'var(--radius-full)',
+                                  border: isFullySelected ? '1px solid #10b981' : '1px solid #d1d5db',
+                                  background: isFullySelected ? '#ecfdf5' : '#ffffff',
+                                  color: isFullySelected ? '#047857' : '#374151',
+                                  fontWeight: isFullySelected ? 700 : 500,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                {isFullySelected ? '✓ ' : '+ '}{series.label}
+                              </button>
+                            )
+                          })}
+                          {selectedModels.length > 0 && (
                             <button
-                              key={idx}
                               type="button"
-                              onClick={() => handleSeriesToggle(series.filter)}
+                              onClick={clearAllModels}
                               style={{
                                 fontSize: '11px',
                                 padding: '4px 10px',
                                 borderRadius: 'var(--radius-full)',
-                                border: isFullySelected ? '1px solid #10b981' : '1px solid #d1d5db',
-                                background: isFullySelected ? '#ecfdf5' : '#ffffff',
-                                color: isFullySelected ? '#047857' : '#374151',
-                                fontWeight: isFullySelected ? 700 : 500,
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                              }}
-                            >
-                              {isFullySelected ? '✓ ' : '+ '}{series.label}
-                            </button>
-                          )
-                        })}
-                        {selectedModels.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={clearAllModels}
-                            style={{
-                              fontSize: '11px',
-                              padding: '4px 10px',
-                              borderRadius: 'var(--radius-full)',
-                              border: '1px solid #fca5a5',
-                              background: '#fef2f2',
-                              color: '#dc2626',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            Clear All ({selectedModels.length})
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Display Selected Models as Multi-Select Buttons */}
-                    {selectedModels.length > 0 && (
-                      <div style={{ marginBottom: '12px' }}>
-                        <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          Selected Models
-                        </div>
-                        <div style={{
-                          display: 'flex',
-                          gap: '6px',
-                          flexWrap: 'wrap',
-                          maxHeight: '120px',
-                          overflowY: 'auto',
-                          padding: '8px',
-                          background: '#ffffff',
-                          borderRadius: 'var(--radius)',
-                          border: '1px solid var(--border)',
-                        }}>
-                          {selectedModels.map(m => (
-                            <button
-                              key={m}
-                              type="button"
-                              onClick={() => toggleModel(m)}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                background: '#111827',
-                                color: '#ffffff',
-                                fontSize: '12px',
+                                border: '1px solid #fca5a5',
+                                background: '#fef2f2',
+                                color: '#dc2626',
                                 fontWeight: 600,
-                                padding: '5px 12px',
-                                borderRadius: 'var(--radius-full)',
-                                border: 'none',
                                 cursor: 'pointer',
-                                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                                transition: 'all 0.15s ease',
                               }}
                             >
-                              <span>✓ {m}</span>
-                              <X size={12} style={{ opacity: 0.8 }} />
+                              Clear All ({selectedModels.length})
                             </button>
-                          ))}
+                          )}
                         </div>
                       </div>
-                    )}
 
-                    {/* Search Filter Input */}
-                    <div style={{ marginBottom: '8px' }}>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder={`Search ${form.mobile_brand || 'mobile'} models...`}
-                        value={modelSearch}
-                        onChange={e => setModelSearch(e.target.value)}
-                        style={{ fontSize: '12px', padding: '6px 10px', background: '#ffffff' }}
-                      />
-                    </div>
+                      {/* Display Selected Models as Multi-Select Buttons */}
+                      {selectedModels.length > 0 && (
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Selected Models
+                          </div>
+                          <div style={{
+                            display: 'flex',
+                            gap: '6px',
+                            flexWrap: 'wrap',
+                            maxHeight: '120px',
+                            overflowY: 'auto',
+                            padding: '8px',
+                            background: '#ffffff',
+                            borderRadius: 'var(--radius)',
+                            border: '1px solid var(--border)',
+                          }}>
+                            {selectedModels.map(m => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => toggleModel(m)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  background: '#111827',
+                                  color: '#ffffff',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  padding: '5px 12px',
+                                  borderRadius: 'var(--radius-full)',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                <span>✓ {m}</span>
+                                <X size={12} style={{ opacity: 0.8 }} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
-                    {/* Checkbox Grid */}
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
-                      gap: '4px',
-                      maxHeight: '180px',
-                      overflowY: 'auto',
-                      padding: '6px',
-                      background: '#ffffff',
-                      borderRadius: 'var(--radius)',
-                      border: '1px solid var(--border)',
-                    }}>
-                      {modelOptions
-                        .filter(m => m.toLowerCase().includes(modelSearch.toLowerCase()))
-                        .map(m => {
-                          const checked = selectedModels.includes(m)
-                          return (
-                            <label
-                              key={m}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                padding: '5px 8px',
-                                borderRadius: '4px',
-                                background: checked ? '#f3f4f6' : 'transparent',
-                                border: checked ? '1px solid #d1d5db' : '1px solid transparent',
-                                cursor: 'pointer',
-                                fontSize: '12px',
-                                fontWeight: checked ? 600 : 400,
-                                color: checked ? '#111827' : '#4b5563',
-                                userSelect: 'none',
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleModel(m)}
-                                style={{ accentColor: '#111827', width: '14px', height: '14px', cursor: 'pointer' }}
-                              />
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</span>
-                            </label>
-                          )
-                        })}
+                      {/* Search Filter Input */}
+                      <div style={{ marginBottom: '8px' }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder={isIpadCategory ? 'Search iPad models...' : `Search ${form.mobile_brand || 'mobile'} models...`}
+                          value={modelSearch}
+                          onChange={e => setModelSearch(e.target.value)}
+                          style={{ fontSize: '12px', padding: '6px 10px', background: '#ffffff' }}
+                        />
+                      </div>
+
+                      {/* Checkbox Grid */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+                        gap: '4px',
+                        maxHeight: '180px',
+                        overflowY: 'auto',
+                        padding: '6px',
+                        background: '#ffffff',
+                        borderRadius: 'var(--radius)',
+                        border: '1px solid var(--border)',
+                      }}>
+                        {modelOptions
+                          .filter(m => m.toLowerCase().includes(modelSearch.toLowerCase()))
+                          .map(m => {
+                            const checked = selectedModels.includes(m)
+                            return (
+                              <label
+                                key={m}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  padding: '5px 8px',
+                                  borderRadius: '4px',
+                                  background: checked ? '#f3f4f6' : 'transparent',
+                                  border: checked ? '1px solid #d1d5db' : '1px solid transparent',
+                                  cursor: 'pointer',
+                                  fontSize: '12px',
+                                  fontWeight: checked ? 600 : 400,
+                                  color: checked ? '#111827' : '#4b5563',
+                                  userSelect: 'none',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleModel(m)}
+                                  style={{ accentColor: '#111827', width: '14px', height: '14px', cursor: 'pointer' }}
+                                />
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</span>
+                              </label>
+                            )
+                          })}
+                      </div>
                     </div>
+                    {errors.mobile_model && <div className="form-error">{errors.mobile_model}</div>}
                   </div>
-                  {errors.mobile_model && <div className="form-error">{errors.mobile_model}</div>}
-                </div>
-              ) : (
-                <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-                  {form.mobile_brand === 'Universal'
-                    ? 'Universal compatibility selected (no model variants required).'
-                    : 'Select a brand compatibility in Basic Information to configure model variants.'}
-                </div>
+                </>
               )}
 
               {/* Product Variant Builder Section */}
@@ -1105,107 +1297,188 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                   </div>
                 </div>
 
-                {/* Colour Variants Selection */}
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <label className="form-label" style={{ marginBottom: 0 }}>
-                      Colour Variants
-                    </label>
-                    {selectedColors.length > 0 && (
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>
-                        {selectedColors.length} Selected ({selectedColors.join(', ')})
-                      </span>
-                    )}
-                  </div>
+                {/* Colour / Tempered Glass Variants Selection */}
+                {isTemperedGlass ? (
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>
+                        Variants
+                      </label>
+                    </div>
+                    <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'center', background: '#fafafa', padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+                      {/* 1st Selection: Dropdown for Border / Borderless */}
+                      <div style={{ flex: '0 1 200px' }}>
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px', color: 'var(--text-muted)' }}>
+                          Border Option
+                        </label>
+                        <select
+                          className="form-select"
+                          value={temperedBorder}
+                          onChange={e => setTemperedBorder(e.target.value)}
+                          style={{ fontSize: '13px', height: '38px', background: '#ffffff' }}
+                        >
+                          <option value="Border">Border</option>
+                          <option value="Borderless">Borderless</option>
+                        </select>
+                      </div>
 
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                    {availableColors.map(color => {
-                      const isSelected = selectedColors.includes(color)
-                      return (
+                      {/* 2nd Selection: Privacy Selection Buttons (not a dropdown) */}
+                      <div style={{ flex: '1 1 340px' }}>
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px', color: 'var(--text-muted)' }}>
+                          Privacy Option
+                        </label>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          {['Normal', '360 Degree privacy', 'Matte Privacy'].map(type => {
+                            const isSelected = temperedPrivacy === type
+                            return (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => setTemperedPrivacy(type)}
+                                style={{
+                                  fontSize: '12px',
+                                  padding: '7px 14px',
+                                  borderRadius: 'var(--radius-full)',
+                                  border: isSelected ? '1.5px solid #111827' : '1px solid #d1d5db',
+                                  background: isSelected ? '#111827' : '#ffffff',
+                                  color: isSelected ? '#ffffff' : '#374151',
+                                  fontWeight: isSelected ? 700 : 500,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  transition: 'all 0.15s ease',
+                                  boxShadow: isSelected ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
+                                }}
+                              >
+                                {isSelected && <span style={{ fontSize: '11px', fontWeight: 800 }}>✓</span>}
+                                {type}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : shouldShowColourVariants ? (
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>
+                        Colour Variants
+                      </label>
+                      {selectedColors.length > 0 && (
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>
+                          {selectedColors.length} Selected ({selectedColors.join(', ')})
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {availableColors.map(color => {
+                        const isSelected = selectedColors.includes(color)
+                        return (
+                          <button
+                            key={color}
+                            type="button"
+                            onClick={() => toggleColor(color)}
+                            style={{
+                              fontSize: '12px',
+                              padding: '6px 14px',
+                              borderRadius: 'var(--radius-full)',
+                              border: isSelected ? '1.5px solid #111827' : '1px solid #d1d5db',
+                              background: isSelected ? '#111827' : '#ffffff',
+                              color: isSelected ? '#ffffff' : '#374151',
+                              fontWeight: isSelected ? 700 : 500,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              transition: 'all 0.15s ease',
+                              boxShadow: isSelected ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
+                            }}
+                          >
+                            {isSelected && <span style={{ fontSize: '11px', fontWeight: 800 }}>✓</span>}
+                            {color}
+                          </button>
+                        )
+                      })}
+
+                      {/* + Add New Button / Inline Input */}
+                      {showAddColorInput ? (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="Type color name..."
+                            value={newColorInput}
+                            onChange={e => setNewColorInput(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                handleAddCustomColor()
+                              }
+                            }}
+                            autoFocus
+                            style={{ fontSize: '12px', padding: '5px 10px', width: '150px', height: '32px' }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            onClick={handleAddCustomColor}
+                            style={{ padding: '5px 12px', fontSize: '12px', height: '32px' }}
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            onClick={() => { setShowAddColorInput(false); setNewColorInput('') }}
+                            style={{ padding: '5px 8px', fontSize: '12px', height: '32px' }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
                         <button
-                          key={color}
                           type="button"
-                          onClick={() => toggleColor(color)}
+                          onClick={() => setShowAddColorInput(true)}
                           style={{
                             fontSize: '12px',
                             padding: '6px 14px',
                             borderRadius: 'var(--radius-full)',
-                            border: isSelected ? '1.5px solid #111827' : '1px solid #d1d5db',
-                            background: isSelected ? '#111827' : '#ffffff',
-                            color: isSelected ? '#ffffff' : '#374151',
-                            fontWeight: isSelected ? 700 : 500,
+                            border: '1.5px dashed #9ca3af',
+                            background: '#f9fafb',
+                            color: '#4b5563',
+                            fontWeight: 600,
                             cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '6px',
+                            gap: '4px',
                             transition: 'all 0.15s ease',
-                            boxShadow: isSelected ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
                           }}
                         >
-                          {isSelected && <span style={{ fontSize: '11px', fontWeight: 800 }}>✓</span>}
-                          {color}
+                          + Add New
                         </button>
-                      )
-                    })}
-
-                    {/* + Add New Button / Inline Input */}
-                    {showAddColorInput ? (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="Type color name..."
-                          value={newColorInput}
-                          onChange={e => setNewColorInput(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault()
-                              handleAddCustomColor()
-                            }
-                          }}
-                          autoFocus
-                          style={{ fontSize: '12px', padding: '5px 10px', width: '150px', height: '32px' }}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-primary"
-                          onClick={handleAddCustomColor}
-                          style={{ padding: '5px 12px', fontSize: '12px', height: '32px' }}
-                        >
-                          Add
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-ghost"
-                          onClick={() => { setShowAddColorInput(false); setNewColorInput('') }}
-                          style={{ padding: '5px 8px', fontSize: '12px', height: '32px' }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setShowAddColorInput(true)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 14px',
-                          borderRadius: 'var(--radius-full)',
-                          border: '1.5px dashed #9ca3af',
-                          background: '#f9fafb',
-                          color: '#4b5563',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        + Add New
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
+                ) : null}
+
+                {/* Collection Input */}
+                <div className="form-group" style={{ marginTop: '16px', marginBottom: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label className="form-label" style={{ marginBottom: 0 }}>
+                      Collection
+                    </label>
+                  </div>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Summer Collection, Anime Series, Leather Edition..."
+                    value={form.collection || ''}
+                    onChange={e => setForm(prev => ({ ...prev, collection: e.target.value }))}
+                    style={{ background: '#ffffff', maxWidth: '400px' }}
+                  />
                 </div>
 
                 {/* Product Details Section Heading */}
@@ -1213,9 +1486,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                   Product details
                 </h3>
 
-                {/* Name & Description Row */}
+                {/* Name, Brand Name & Description Row */}
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                  <div className="form-group" style={{ flex: '1 1 220px', marginBottom: 0 }}>
+                  <div className="form-group" style={{ flex: '1 1 200px', marginBottom: 0 }}>
                     <label className="form-label">Name</label>
                     <input
                       type="text"
@@ -1225,7 +1498,19 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                       onChange={e => setVariantDraft(prev => ({ ...prev, name: e.target.value }))}
                     />
                   </div>
-                  <div className="form-group" style={{ flex: '2 1 340px', marginBottom: 0 }}>
+                  {isAccessoriesCategory && (
+                    <div className="form-group" style={{ flex: '1 1 180px', marginBottom: 0 }}>
+                      <label className="form-label">Brand Name</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Brand Name (e.g., Anker, Spigen)"
+                        value={variantDraft.brand_name || ''}
+                        onChange={e => setVariantDraft(prev => ({ ...prev, brand_name: e.target.value }))}
+                      />
+                    </div>
+                  )}
+                  <div className="form-group" style={{ flex: '2 1 260px', marginBottom: 0 }}>
                     <label className="form-label">Description</label>
                     <input
                       type="text"
@@ -1318,7 +1603,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                       <tr style={{ background: '#f9fafb', borderBottom: '2px solid var(--border-strong)', color: '#111827', fontWeight: 700 }}>
                         <th style={{ padding: '12px 14px' }}>Product Image</th>
                         <th style={{ padding: '12px 14px' }}>Product Name</th>
-                        <th style={{ padding: '12px 14px' }}>Colour Variant</th>
+                        {(shouldShowColourVariants || isTemperedGlass) && (
+                          <th style={{ padding: '12px 14px' }}>{isTemperedGlass ? 'Variant' : 'Colour Variant'}</th>
+                        )}
                         <th style={{ padding: '12px 14px' }}>MRP</th>
                         <th style={{ padding: '12px 14px' }}>Selling Price</th>
                         <th style={{ padding: '12px 14px' }}>Quantity</th>
@@ -1328,7 +1615,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                     <tbody>
                       {variantsList.length === 0 ? (
                         <tr>
-                          <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                          <td colSpan={(shouldShowColourVariants || isTemperedGlass) ? 7 : 6} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
                             No product variants added yet. Add a variant above to configure products.
                           </td>
                         </tr>
@@ -1353,17 +1640,20 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                             </td>
                             <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--text-primary)', verticalAlign: 'middle' }}>
                               {variant.name}
-                              {variant.description && (
+                              {(variant.brand_name || variant.description) && (
                                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400, marginTop: '2px' }}>
+                                  {variant.brand_name && <span><strong>Brand:</strong> {variant.brand_name}{variant.description ? ' • ' : ''}</span>}
                                   {variant.description}
                                 </div>
                               )}
                             </td>
-                            <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
-                              <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', background: '#f3f4f6', color: '#111827', fontWeight: 700, border: '1px solid #e5e7eb' }}>
-                                {variant.color || (selectedColors.length > idx ? selectedColors[idx] : '—')}
-                              </span>
-                            </td>
+                            {(shouldShowColourVariants || isTemperedGlass) && (
+                              <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                                <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', background: '#f3f4f6', color: '#111827', fontWeight: 700, border: '1px solid #e5e7eb' }}>
+                                  {variant.color || (selectedColors.length > idx ? selectedColors[idx] : '—')}
+                                </span>
+                              </td>
+                            )}
                             <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
                               ₹{Number(variant.mrp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </td>

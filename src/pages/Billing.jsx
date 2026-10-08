@@ -65,7 +65,7 @@ const ProductSearch = ({ onAddToCart }) => {
   const search = useCallback(async (q) => {
     if (!q.trim() || q.length < 2) { setResults([]); setShowResults(false); return }
     setSearching(true)
-    const { data } = await supabase
+    const { data: prodData } = await supabase
       .from('products')
       .select('*, product_images(public_url, is_primary)')
       .eq('approval_status', 'APPROVED')
@@ -73,7 +73,60 @@ const ProductSearch = ({ onAddToCart }) => {
       .or(`name.ilike.%${q}%,product_id.ilike.%${q}%,mobile_model.ilike.%${q}%,mobile_brand.ilike.%${q}%,color_variants.ilike.%${q}%`)
       .gt('current_stock', 0)
       .limit(8)
-    setResults(data || [])
+
+    const { data: accData } = await supabase
+      .from('accessories')
+      .select(`
+        *,
+        categories(name),
+        subcategories(name),
+        accessory_variants(
+          id,
+          sku,
+          variant_name,
+          description,
+          attributes,
+          mrp,
+          selling_price,
+          quantity,
+          is_active,
+          accessory_variant_images(image_url, is_primary)
+        ),
+        accessory_compatible_models(mobile_models(model_name))
+      `)
+      .eq('is_active', true)
+      .or(`product_name.ilike.%${q}%,product_id.ilike.%${q}%,brand_name.ilike.%${q}%`)
+      .limit(8)
+
+    const mappedAcc = (accData || []).flatMap(acc => {
+      const models = acc.accessory_compatible_models?.map(m => m.mobile_models?.model_name).filter(Boolean) || []
+      return (acc.accessory_variants || []).filter(v => v.is_active && (v.quantity || 0) > 0).map(v => {
+        const color = v.attributes?.color || ''
+        const displayName = color && !acc.product_name.toLowerCase().includes(color.toLowerCase())
+          ? `${acc.product_name} - ${color}`
+          : (v.variant_name || acc.product_name)
+        const images = (v.accessory_variant_images || []).map(img => ({ public_url: img.image_url, is_primary: img.is_primary }))
+
+        return {
+          id: v.id,
+          product_id: acc.product_id || `WS-ACC-${acc.id.slice(0, 6)}`,
+          name: displayName,
+          color_variants: color,
+          mobile_brand: acc.brand_name || 'Universal',
+          mobile_model: models.join(', ') || 'Universal',
+          selling_price: v.selling_price || 0,
+          mrp: v.mrp || 0,
+          current_stock: v.quantity || 0,
+          min_stock_level: 5,
+          product_images: images,
+          isAccessory: true,
+          accessory_id: acc.id,
+        }
+      })
+    })
+
+    const mergedResults = [...(prodData || []), ...mappedAcc].slice(0, 8)
+    setResults(mergedResults)
     setShowResults(true)
     setSearching(false)
   }, [])

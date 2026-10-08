@@ -15,22 +15,80 @@ const EditProduct = () => {
 
   useEffect(() => {
     const fetchProduct = async () => {
-      const { data, error } = await supabase
+      // 1. Try fetching from products table (Mobile Cases)
+      const { data: prodData } = await supabase
         .from('products')
         .select('*, product_images(*)')
         .eq('id', id)
-        .single()
+        .maybeSingle()
 
-      if (error) {
+      if (prodData) {
+        setProduct(prodData)
+        setLoading(false)
+        return
+      }
+
+      // 2. Try fetching from accessories table (Accessories)
+      const { data: accData, error: accError } = await supabase
+        .from('accessories')
+        .select(`
+          *,
+          categories(name),
+          subcategories(name),
+          accessory_variants(
+            *,
+            accessory_variant_images(*)
+          ),
+          accessory_compatible_models(
+            *,
+            mobile_models(model_name)
+          )
+        `)
+        .eq('id', id)
+        .maybeSingle()
+
+      if (accError || !accData) {
         toast.error('Product not found')
         navigate('/products')
         return
       }
-      setProduct(data)
+
+      const models = accData.accessory_compatible_models?.map(m => m.mobile_models?.model_name).filter(Boolean) || []
+      const primaryVar = accData.accessory_variants?.[0]
+      const images = accData.accessory_variants?.flatMap(v => (v.accessory_variant_images || []).map(img => ({
+        id: img.id,
+        public_url: img.image_url,
+        is_primary: img.is_primary,
+      }))) || []
+
+      const mappedAccProduct = {
+        id: accData.id,
+        product_id: accData.product_id || `WS-ACC-${accData.id.slice(0, 6)}`,
+        name: accData.product_name,
+        product_type: 'accessories',
+        category_id: accData.category_id,
+        subcategory_id: accData.subcategory_id,
+        brand_name: accData.brand_name || '',
+        mobile_brand: accData.compatibility_type ? accData.compatibility_type.charAt(0).toUpperCase() + accData.compatibility_type.slice(1) : 'Universal',
+        mobile_model: models.join(', '),
+        color_variants: accData.accessory_variants?.map(v => v.attributes?.color || v.variant_name).join(', ') || '',
+        description: accData.description || '',
+        purchase_price: '0',
+        mrp: primaryVar?.mrp?.toString() || '0',
+        selling_price: primaryVar?.selling_price?.toString() || '0',
+        current_stock: primaryVar?.quantity?.toString() || '0',
+        min_stock_level: '5',
+        approval_status: 'APPROVED',
+        product_images: images,
+        accessory_variants: accData.accessory_variants || [],
+        isAccessory: true,
+      }
+
+      setProduct(mappedAccProduct)
       setLoading(false)
     }
     fetchProduct()
-  }, [id])
+  }, [id, navigate])
 
   if (loading) {
     return (
@@ -53,6 +111,7 @@ const EditProduct = () => {
     mobile_brand: product.mobile_brand || '',
     mobile_model: product.mobile_model || '',
     color_variants: product.color_variants || '',
+    collection: product.collection || '',
     description: product.description || '',
     purchase_price: product.purchase_price?.toString() || '',
     mrp: getMrp(product)?.toString() || '',
