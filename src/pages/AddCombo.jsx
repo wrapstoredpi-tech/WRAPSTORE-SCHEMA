@@ -2,15 +2,26 @@ import React, { useState, useEffect } from 'react'
 import {
   PackagePlus, Plus, Search, Trash2, Check, X,
   ShoppingBag, ShieldCheck, Layers, ArrowLeft,
-  Info, History, Tag, Smartphone, Sparkles
+  Info, History, Tag, Smartphone, Sparkles, Lock, AlertTriangle
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { fetchMergedCategories } from '../lib/categoryStorage'
 import ProductImageHover from '../components/common/ProductImageHover'
+import { reconcileCombosWithLiveStock } from '../lib/comboSync'
 
 const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
 const INR = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
 const AddCombo = () => {
@@ -32,13 +43,65 @@ const AddCombo = () => {
   const [selectedItems, setSelectedItems] = useState([]) // Array of { product, allottedQty }
   const [savingCombo, setSavingCombo] = useState(false)
 
-  // Fetch saved combos from localStorage / DB
-  const fetchCombos = () => {
+  // Fetch saved combos from DB with live stock reconciliation & localStorage fallback
+  const fetchCombos = async () => {
+    try {
+      // Reconcile combos with live stock in DB & localStorage
+      const reconciled = await reconcileCombosWithLiveStock(supabase)
+      if (reconciled && reconciled.length > 0) {
+        const formatted = reconciled.map(c => ({
+          ...c,
+          id: c.id,
+          code: c.combo_code || c.code || `WS-CMB-${c.id.slice(0, 4)}`,
+          combo_code: c.combo_code || c.code,
+          name: c.name,
+          description: c.description,
+          selling_price: Number(c.selling_price) || 0,
+          original_value: Number(c.original_value) || 0,
+          items: Array.isArray(c.items) ? c.items : (typeof c.items === 'string' ? JSON.parse(c.items) : []),
+          created_at: c.created_at,
+        }))
+        setCombos(formatted)
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('combos')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+
+      if (!error && data) {
+        const formatted = data.map(c => ({
+          ...c,
+          id: c.id,
+          code: c.combo_code || c.code || `WS-CMB-${c.id.slice(0, 4)}`,
+          combo_code: c.combo_code || c.code,
+          name: c.name,
+          description: c.description,
+          selling_price: Number(c.selling_price) || 0,
+          original_value: Number(c.original_value) || 0,
+          items: Array.isArray(c.items) ? c.items : (typeof c.items === 'string' ? JSON.parse(c.items) : []),
+          created_at: c.created_at,
+        }))
+        setCombos(formatted)
+        localStorage.setItem('wrapstore_combos_v1', JSON.stringify(formatted))
+        return
+      }
+
+      if (error && error.code !== '42P01') {
+        console.warn('Notice reading combos from DB:', error.message)
+      }
+    } catch (e) {
+      console.warn('Network / DB exception reading combos:', e)
+    }
+
+    // Fallback: localStorage
     try {
       const stored = localStorage.getItem('wrapstore_combos_v1')
       setCombos(stored ? JSON.parse(stored) : [])
     } catch (e) {
-      console.warn('Error reading combos:', e)
+      console.warn('Error reading combos from localStorage:', e)
       setCombos([])
     }
   }
@@ -85,21 +148,19 @@ const AddCombo = () => {
       if (existing) {
         return prev.filter(item => item.product.id !== product.id)
       } else {
-        return [...prev, { product, allottedQty: 1 }]
+        return [...prev, { product }]
       }
     })
   }
 
-  const handleQtyChange = (productId, newQty) => {
-    const qty = Math.max(1, Number(newQty) || 1)
-    setSelectedItems(prev =>
-      prev.map(item => item.product.id === productId ? { ...item, allottedQty: qty } : item)
-    )
-  }
+  // Calculate maximum allowed/possible combos based on minimum available stock among selected products
+  const maxPossibleCombos = selectedItems.length > 0
+    ? Math.min(...selectedItems.map(item => Math.max(0, Number(item.product.current_stock || 0))))
+    : 0
 
-  // Calculate regular total price of selected items
+  // Calculate regular total price of selected items (sum of 1 unit of each constituent product)
   const totalRegularValue = selectedItems.reduce(
-    (sum, item) => sum + (Number(item.product.selling_price) || 0) * item.allottedQty,
+    (sum, item) => sum + (Number(item.product.selling_price) || 0),
     0
   )
 
@@ -116,6 +177,11 @@ const AddCombo = () => {
       return
     }
 
+    if (maxPossibleCombos <= 0) {
+      toast.error('Cannot create combo because one or more selected products have 0 stock available.')
+      return
+    }
+
     const price = Number(sellingPrice)
     if (isNaN(price) || price <= 0) {
       toast.error('Please enter a valid combo selling price')
@@ -125,24 +191,90 @@ const AddCombo = () => {
     setSavingCombo(true)
 
     try {
-      const comboId = `combo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      const comboId = generateUUID()
       const comboCode = `WS-CMB-${Math.floor(1000 + Math.random() * 9000)}`
 
-      // 1. Log inventory movement for EACH allotted product
-      // Note: As specified, main stock is NOT deducted (new_stock = previous_stock)
+      const comboItemsSnapshot = selectedItems.map(i => ({
+        product_id: i.product.id,
+        product_name: i.product.name,
+        product_code: i.product.product_id,
+        mobile_model: i.product.mobile_model,
+        unit_price: Number(i.product.selling_price) || 0,
+        allotted_qty: maxPossibleCombos,
+        image: i.product.product_images?.find(img => img.is_primary)?.public_url || i.product.product_images?.[0]?.public_url || null,
+      }))
+
+      // 1. Insert row into public.combos table in database
+      let dbSaved = false
+      let insertedDbRow = null
+
+      const comboRow = {
+        id: comboId,
+        combo_code: comboCode,
+        code: comboCode,
+        name: comboName.trim(),
+        description: description.trim() || null,
+        selling_price: price,
+        original_value: totalRegularValue,
+        items: comboItemsSnapshot,
+        is_active: true,
+        created_by: isValidUuid(user?.id) ? user.id : null,
+      }
+
+      const { data: dbData, error: dbErr } = await supabase
+        .from('combos')
+        .insert(comboRow)
+        .select()
+        .single()
+
+      if (dbErr) {
+        console.warn('Combos DB insert notice:', dbErr.message)
+        if (dbErr.code === '42P01' || dbErr.message?.includes('does not exist')) {
+          toast.error(
+            'Combos table does not exist in DB yet! Run database/create_combos_table.sql in Supabase SQL editor.',
+            { duration: 8000 }
+          )
+        } else {
+          toast.error(`Database notice: ${dbErr.message}`)
+        }
+      } else {
+        dbSaved = true
+        insertedDbRow = dbData
+
+        // 2. Insert into relational public.combo_items table with auto-calculated allotted_qty
+        const comboItemRows = selectedItems.map(i => ({
+          combo_id: comboId,
+          product_id: isValidUuid(i.product.id) ? i.product.id : null,
+          product_name: i.product.name,
+          product_code: i.product.product_id || '',
+          mobile_model: i.product.mobile_model || '',
+          allotted_qty: maxPossibleCombos,
+          unit_price: Number(i.product.selling_price) || 0,
+        }))
+
+        const { error: itemsErr } = await supabase
+          .from('combo_items')
+          .insert(comboItemRows)
+
+        if (itemsErr) {
+          console.warn('combo_items table insert notice:', itemsErr.message)
+        }
+      }
+
+      // 3. Log inventory movement for EACH allotted product
+      // Note: Main inventory stock is NOT deducted (new_stock = previous_stock)
       const movementEntries = []
       for (const item of selectedItems) {
         const p = item.product
-        const allotted = item.allottedQty
         const currentStock = p.current_stock || 0
 
         movementEntries.push({
           product_id: p.id,
           movement_type: 'MANUAL_ADJUSTMENT',
-          quantity: allotted,
+          quantity: maxPossibleCombos,
           previous_stock: currentStock,
           new_stock: currentStock, // Main inventory stock NOT deducted
-          reason: `Combo Stock Allotment: ${comboName.trim()} (${allotted} units allocated)`,
+          reason: `Combo Stock Allotment: ${comboName.trim()} (${maxPossibleCombos} combos possible)`,
           reference_id: comboId,
           performed_by: isValidUuid(user?.id) ? user.id : null,
         })
@@ -165,24 +297,17 @@ const AddCombo = () => {
         }
       }
 
-      // 2. Save combo record to local storage (wrapstore_combos_v1)
+      // 4. Update local state & localStorage cache
       const newCombo = {
         id: comboId,
-        code: comboCode,
+        code: insertedDbRow?.combo_code || comboCode,
+        combo_code: insertedDbRow?.combo_code || comboCode,
         name: comboName.trim(),
         description: description.trim() || null,
         selling_price: price,
         original_value: totalRegularValue,
-        items: selectedItems.map(i => ({
-          product_id: i.product.id,
-          product_name: i.product.name,
-          product_code: i.product.product_id,
-          mobile_model: i.product.mobile_model,
-          unit_price: i.product.selling_price,
-          allotted_qty: i.allottedQty,
-          image: i.product.product_images?.find(img => img.is_primary)?.public_url || i.product.product_images?.[0]?.public_url || null,
-        })),
-        created_at: new Date().toISOString(),
+        items: comboItemsSnapshot,
+        created_at: insertedDbRow?.created_at || new Date().toISOString(),
       }
 
       const existingCombos = combos
@@ -190,7 +315,11 @@ const AddCombo = () => {
       localStorage.setItem('wrapstore_combos_v1', JSON.stringify(updatedList))
       setCombos(updatedList)
 
-      toast.success(`Combo "${comboName.trim()}" created & ${selectedItems.length} inventory history entries logged!`)
+      if (dbSaved) {
+        toast.success(`Combo "${comboName.trim()}" saved to database & inventory movements logged!`)
+      } else {
+        toast.success(`Combo "${comboName.trim()}" created locally (table pending in DB).`)
+      }
       setIsModalOpen(false)
     } catch (err) {
       console.error('Error creating combo:', err)
@@ -204,8 +333,24 @@ const AddCombo = () => {
     const targetCombo = combos.find(c => c.id === comboId)
     if (!targetCombo) return
 
+    if (!window.confirm(`Are you sure you want to remove combo "${targetCombo.name}"?`)) {
+      return
+    }
+
     try {
-      // 1. Log inventory movement REVERSAL / Deallocation entries for each item
+      // 1. Delete from Supabase DB
+      if (isValidUuid(comboId)) {
+        const { error: delErr } = await supabase
+          .from('combos')
+          .delete()
+          .eq('id', comboId)
+
+        if (delErr) {
+          console.warn('Notice deleting combo from DB:', delErr.message)
+        }
+      }
+
+      // 2. Log inventory movement REVERSAL / Deallocation entries for each item
       const reversalEntries = []
       if (targetCombo.items && targetCombo.items.length > 0) {
         for (const item of targetCombo.items) {
@@ -253,7 +398,7 @@ const AddCombo = () => {
         }
       }
 
-      // 2. Remove combo from localStorage and state
+      // 3. Remove combo from localStorage and state
       const updated = combos.filter(c => c.id !== comboId)
       localStorage.setItem('wrapstore_combos_v1', JSON.stringify(updated))
       setCombos(updated)
@@ -392,14 +537,29 @@ const AddCombo = () => {
                       {new Date(combo.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                     </span>
                   </div>
-                  <button
-                    className="btn btn-ghost btn-icon btn-sm"
-                    onClick={() => handleDeleteCombo(combo.id)}
-                    title="Remove combo"
-                    style={{ color: 'var(--danger)' }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      background: (combo.items?.length > 0 ? Math.min(...combo.items.map(it => Number(it.allotted_qty) || 0)) : 0) > 0 ? '#ecfdf5' : '#fef2f2',
+                      color: (combo.items?.length > 0 ? Math.min(...combo.items.map(it => Number(it.allotted_qty) || 0)) : 0) > 0 ? '#047857' : '#b91c1c',
+                      border: `1px solid ${(combo.items?.length > 0 ? Math.min(...combo.items.map(it => Number(it.allotted_qty) || 0)) : 0) > 0 ? '#a7f3d0' : '#fecaca'}`
+                    }}>
+                      {(combo.items?.length > 0 ? Math.min(...combo.items.map(it => Number(it.allotted_qty) || 0)) : 0) > 0
+                        ? `${Math.min(...combo.items.map(it => Number(it.allotted_qty) || 0))} Combos Available`
+                        : 'Out of Stock'}
+                    </span>
+                    <button
+                      className="btn btn-ghost btn-icon btn-sm"
+                      onClick={() => handleDeleteCombo(combo.id)}
+                      title="Remove combo"
+                      style={{ color: 'var(--danger)' }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="card-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -731,12 +891,60 @@ const AddCombo = () => {
                   </div>
                 </div>
 
-                {/* Selected Products & Quantity Allotment Section */}
+                {/* Selected Products & Auto-Calculated Allotment Section */}
                 {selectedItems.length > 0 && (
-                  <div style={{ background: '#f9fafb', padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--brand-black)', marginBottom: '10px' }}>
-                      Allot Quantity from Inventory Stock
+                  <div style={{ background: '#f9fafb', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+                    
+                    {/* Possible Combos Highlight Banner */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: maxPossibleCombos > 0 ? '#ecfdf5' : '#fef2f2',
+                      border: `1.5px solid ${maxPossibleCombos > 0 ? '#10b981' : '#ef4444'}`,
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '12px 14px',
+                      marginBottom: '14px',
+                      gap: '12px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {maxPossibleCombos > 0 ? (
+                          <ShieldCheck size={22} color="#059669" />
+                        ) : (
+                          <AlertTriangle size={22} color="#dc2626" />
+                        )}
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 800, color: maxPossibleCombos > 0 ? '#065f46' : '#991b1b' }}>
+                            {maxPossibleCombos > 0
+                              ? `Only ${maxPossibleCombos} Combos Possible`
+                              : '0 Combos Possible (Stock Depleted)'}
+                          </div>
+                          <div style={{ fontSize: '11px', color: maxPossibleCombos > 0 ? '#047857' : '#b91c1c' }}>
+                            {maxPossibleCombos > 0
+                              ? 'Automatically locked to the lowest available stock. Quantity cannot be manually edited or added.'
+                              : 'One or more selected products are out of stock. Combos cannot be created.'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{
+                        background: maxPossibleCombos > 0 ? '#059669' : '#dc2626',
+                        color: '#ffffff',
+                        fontWeight: 800,
+                        fontSize: '14px',
+                        padding: '4px 12px',
+                        borderRadius: '20px',
+                        letterSpacing: '0.02em',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {maxPossibleCombos} Allowed
+                      </div>
                     </div>
+
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--brand-black)', marginBottom: '10px' }}>
+                      Selected Products ({selectedItems.length})
+                    </div>
+
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {selectedItems.map((item) => (
                         <div
@@ -746,7 +954,7 @@ const AddCombo = () => {
                             alignItems: 'center',
                             justifyContent: 'space-between',
                             background: '#ffffff',
-                            padding: '8px 12px',
+                            padding: '10px 14px',
                             borderRadius: 'var(--radius-sm)',
                             border: '1px solid var(--border)',
                             gap: '12px'
@@ -756,29 +964,28 @@ const AddCombo = () => {
                             <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {item.product.name}
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                              Available Stock: <strong>{item.product.current_stock}</strong> units
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                              <span>Available Stock: <strong style={{ color: item.product.current_stock > 0 ? '#059669' : '#dc2626' }}>{item.product.current_stock}</strong> units</span>
+                              <span>•</span>
+                              <span>Price: {INR(item.product.selling_price)}</span>
                             </div>
                           </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>Allot Qty:</label>
-                            <input
-                              type="number"
-                              min="1"
-                              max={item.product.current_stock || 9999}
-                              value={item.allottedQty}
-                              onChange={e => handleQtyChange(item.product.id, e.target.value)}
-                              style={{
-                                width: '60px',
-                                textAlign: 'center',
-                                padding: '4px 6px',
-                                fontSize: '13px',
-                                fontWeight: 700,
-                                border: '1.5px solid var(--border-strong)',
-                                borderRadius: 'var(--radius-sm)'
-                              }}
-                            />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              background: '#f3f4f6',
+                              border: '1px solid #e5e7eb',
+                              padding: '5px 10px',
+                              borderRadius: 'var(--radius-sm)'
+                            }}>
+                              <Lock size={12} color="#6b7280" />
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>Allotted Qty:</span>
+                              <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--brand-black)' }}>{maxPossibleCombos}</span>
+                            </div>
+
                             <button
                               type="button"
                               className="btn btn-ghost btn-icon btn-sm"
@@ -786,7 +993,7 @@ const AddCombo = () => {
                               style={{ color: 'var(--danger)' }}
                               title="Remove item"
                             >
-                              <X size={14} />
+                              <X size={15} />
                             </button>
                           </div>
                         </div>
@@ -794,14 +1001,14 @@ const AddCombo = () => {
                     </div>
 
                     {/* Pricing Summary Breakdown */}
-                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                    <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px dashed var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
                       <div>
                         <span style={{ color: 'var(--text-muted)' }}>Regular Value: </span>
                         <span style={{ fontWeight: 700, textDecoration: 'line-through' }}>{INR(totalRegularValue)}</span>
                       </div>
                       <div>
                         <span style={{ color: 'var(--text-muted)' }}>Combo Offer: </span>
-                        <span style={{ fontWeight: 800, fontSize: '14px', color: 'var(--brand-black)' }}>
+                        <span style={{ fontWeight: 800, fontSize: '15px', color: 'var(--brand-black)' }}>
                           {sellingPrice ? INR(sellingPrice) : 'Enter Price'}
                         </span>
                       </div>
@@ -823,7 +1030,7 @@ const AddCombo = () => {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={savingCombo || selectedItems.length === 0}
+                  disabled={savingCombo || selectedItems.length === 0 || maxPossibleCombos === 0}
                   id="save-combo-btn"
                 >
                   {savingCombo ? (
@@ -832,7 +1039,7 @@ const AddCombo = () => {
                     </>
                   ) : (
                     <>
-                      <Check size={15} /> Save & Allot Combo
+                      <Check size={15} /> Save & Allot Combo ({maxPossibleCombos})
                     </>
                   )}
                 </button>

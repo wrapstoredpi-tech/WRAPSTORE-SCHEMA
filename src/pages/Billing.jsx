@@ -11,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { downloadInvoicePDF, printInvoicePDF, getInvoicePDFBlob } from '../lib/invoicePdf'
 import ProductImageHover from '../components/common/ProductImageHover'
 import { getFormattedProductName } from '../lib/productUtils'
+import { updateCombosAfterProductStockChange } from '../lib/comboSync'
 
 // ---- Helpers ----
 const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
@@ -125,7 +126,84 @@ const ProductSearch = ({ onAddToCart }) => {
       })
     })
 
-    const mergedResults = [...(prodData || []), ...mappedAcc].slice(0, 8)
+    // Search combos
+    let comboResults = []
+    try {
+      const { data: comboData } = await supabase
+        .from('combos')
+        .select('*, combo_items(id, allotted_qty, product_id, product_name, product_code, mobile_model, unit_price)')
+        .eq('is_active', true)
+        .or(`name.ilike.%${q}%,combo_code.ilike.%${q}%,code.ilike.%${q}%,description.ilike.%${q}%`)
+        .limit(8)
+
+      if (comboData && comboData.length > 0) {
+        comboResults = comboData
+      }
+    } catch (e) {
+      console.warn('Error querying combos in billing:', e)
+    }
+
+    // Fallback: check localStorage combos
+    if (comboResults.length === 0) {
+      try {
+        const stored = JSON.parse(localStorage.getItem('wrapstore_combos_v1') || '[]')
+        const lowerQ = q.toLowerCase()
+        comboResults = stored.filter(c =>
+          c.is_active !== false && (
+            c.name?.toLowerCase().includes(lowerQ) ||
+            c.combo_code?.toLowerCase().includes(lowerQ) ||
+            c.code?.toLowerCase().includes(lowerQ) ||
+            c.description?.toLowerCase().includes(lowerQ)
+          )
+        )
+      } catch (e) {}
+    }
+
+    const mappedCombos = comboResults.map(c => {
+      // 1. Get combo items from relational combo_items or items JSONB
+      let items = []
+      if (Array.isArray(c.combo_items) && c.combo_items.length > 0) {
+        items = c.combo_items
+      } else if (Array.isArray(c.items)) {
+        items = c.items
+      } else if (typeof c.items === 'string') {
+        try { items = JSON.parse(c.items) } catch (e) { items = [] }
+      }
+
+      const firstImg = items.find(i => i.image)?.image || null
+      const modelsSummary = items.map(i => `${i.product_name} (x${i.allotted_qty})`).join(', ')
+
+      // 2. Compute exact stock count directly from DB
+      // In the database (public.combo_items / combos.items), each product has allotted_qty (e.g. 5)
+      let comboStock = 0
+      if (items.length > 0) {
+        const quantities = items.map(i => Number(i.allotted_qty)).filter(n => !isNaN(n) && n >= 0)
+        comboStock = quantities.length > 0 ? Math.min(...quantities) : 0
+      } else if (c.allotted_qty !== undefined && c.allotted_qty !== null) {
+        comboStock = Number(c.allotted_qty) || 0
+      }
+
+      return {
+        id: c.id,
+        product_id: c.combo_code || c.code || `WS-CMB-${c.id.slice(0, 4)}`,
+        name: `Combo - ${c.name}`,
+        raw_name: c.name,
+        product_type: 'combo',
+        mobile_brand: 'Bundle',
+        mobile_model: modelsSummary || c.description || 'Custom Product Combo',
+        selling_price: Number(c.selling_price) || 0,
+        mrp: Number(c.original_value) || Number(c.selling_price) || 0,
+        current_stock: comboStock,
+        min_stock_level: 2,
+        discount_percentage: 0,
+        gst_percentage: 18,
+        product_images: firstImg ? [{ public_url: firstImg, is_primary: true }] : [],
+        isCombo: true,
+        combo_items: items,
+      }
+    })
+
+    const mergedResults = [...(prodData || []), ...mappedAcc, ...mappedCombos].slice(0, 10)
     setResults(mergedResults)
     setShowResults(true)
     setSearching(false)
@@ -140,7 +218,7 @@ const ProductSearch = ({ onAddToCart }) => {
   const handleSelect = (product) => {
     onAddToCart({
       ...product,
-      name: getFormattedProductName(product),
+      name: product.isCombo ? product.name : getFormattedProductName(product),
     })
     setQuery('')
     setResults([])
@@ -158,7 +236,7 @@ const ProductSearch = ({ onAddToCart }) => {
           ref={searchRef}
           className="search-input"
           style={{ width: '100%', paddingLeft: 36, fontSize: '14px', height: 44 }}
-          placeholder="Search by product name, ID (WS-000001) or mobile model..."
+          placeholder="Search by product name, ID (WS-000001), combo (WS-CMB), or model..."
           value={query}
           onChange={e => setQuery(e.target.value)}
           onFocus={() => results.length > 0 && setShowResults(true)}
@@ -189,7 +267,7 @@ const ProductSearch = ({ onAddToCart }) => {
         }}>
           {results.map(p => {
             const img = getPrimaryImg(p.product_images)
-            const displayName = getFormattedProductName(p)
+            const displayName = p.isCombo ? p.name : getFormattedProductName(p)
             return (
               <div
                 key={p.id}
@@ -208,10 +286,27 @@ const ProductSearch = ({ onAddToCart }) => {
               >
                 <ProductImageHover src={img} title={displayName} alt={displayName} size={40} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', gap: 8 }}>
-                    <code style={{ background: '#f3f4f6', padding: '1px 5px', borderRadius: 3 }}>{p.product_id}</code>
-                    {p.mobile_model && <span>{p.mobile_model}</span>}
+                  <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {p.isCombo && (
+                      <span style={{
+                        background: '#7c3aed',
+                        color: '#ffffff',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: '4px',
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                        flexShrink: 0
+                      }}>
+                        COMBO
+                      </span>
+                    )}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <code style={{ background: '#f3f4f6', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>{p.product_id}</code>
+                    {p.mobile_model && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.mobile_model}</span>}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -280,13 +375,30 @@ const CartItemRow = ({ item, onQtyChange, onRemove }) => {
 
       {/* Name + meta */}
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, display: 'flex', gap: 6 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {item.isCombo && (
+            <span style={{
+              background: '#7c3aed',
+              color: '#ffffff',
+              fontSize: '9px',
+              fontWeight: 700,
+              padding: '1px 5px',
+              borderRadius: '3px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              flexShrink: 0
+            }}>
+              COMBO
+            </span>
+          )}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>{item.product_id}</code>
           {item.mobile_model && <span>{item.mobile_model}</span>}
           <span style={{ color: 'var(--text-muted)' }}>GST {item.gst_percentage}%</span>
         </div>
-        {item.qty > item.current_stock && (
+        {!item.isCombo && item.qty > item.current_stock && (
           <div style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 600, marginTop: 2 }}>
             ⚠ Only {item.current_stock} available
           </div>
@@ -561,6 +673,36 @@ const Billing = () => {
       // ---- STEP 1: Validate stock for each cart item ----
       const stockCheckErrors = []
       for (const item of cart) {
+        if (item.isCombo) {
+          // For combo, check underlying items if available
+          if (item.combo_items && item.combo_items.length > 0) {
+            for (const ci of item.combo_items) {
+              if (ci.product_id && isValidUuid(ci.product_id)) {
+                // Each combo sold uses 1 unit of each constituent product
+                const reqQty = 1 * item.qty
+                const { data: freshProduct } = await supabase
+                  .from('products')
+                  .select('current_stock, name, product_id')
+                  .eq('id', ci.product_id)
+                  .single()
+
+                if (freshProduct && freshProduct.current_stock < reqQty) {
+                  stockCheckErrors.push({
+                    name: `${item.name} (${ci.product_name})`,
+                    requested: reqQty,
+                    available: freshProduct.current_stock,
+                  })
+                }
+              }
+            }
+          }
+          continue
+        }
+
+        if (item.isAccessory) {
+          continue
+        }
+
         const { data: freshProduct } = await supabase
           .from('products')
           .select('current_stock, name, product_id')
@@ -648,10 +790,10 @@ const Billing = () => {
 
         return {
           invoice_id: invoice.id,
-          product_id: item.id,
+          product_id: item.isCombo || item.isAccessory ? null : (isValidUuid(item.id) ? item.id : null),
           product_id_code: item.product_id,
           product_name: item.name,
-          product_type: item.product_type,
+          product_type: item.product_type || (item.isCombo ? 'combo' : 'general'),
           mobile_brand: item.mobile_brand || null,
           mobile_model: item.mobile_model || null,
           quantity: item.qty,
@@ -690,11 +832,68 @@ const Billing = () => {
       }
 
       // ── STEP 5: Atomic stock deduction via DB RPC (race-condition safe) ──
-      // deduct_stock() uses SELECT ... FOR UPDATE (row-level lock).
-      // If an online order already took the last unit between STEP 1 validation
-      // and now, this will return success:false and we abort cleanly.
       const stockDeductErrors = []
+      const affectedProductIds = new Set()
+
       for (const item of cart) {
+        if (item.isCombo) {
+          // Deduct stock for each constituent product in combo (1 unit per combo)
+          if (item.combo_items && item.combo_items.length > 0) {
+            for (const ci of item.combo_items) {
+              if (ci.product_id && isValidUuid(ci.product_id)) {
+                affectedProductIds.add(ci.product_id)
+                const qtyToDeduct = 1 * item.qty
+                const { data: rpcResult, error: rpcErr } = await supabase.rpc('deduct_stock', {
+                  p_product_id:   ci.product_id,
+                  p_quantity:     qtyToDeduct,
+                  p_channel:      'POS',
+                  p_reference_id: invoice.id,
+                  p_performed_by: isValidUuid(user?.id) ? user.id : null,
+                })
+
+                if (rpcErr || !rpcResult?.success) {
+                  // Direct stock deduction fallback
+                  try {
+                    const { data: curP } = await supabase.from('products').select('current_stock').eq('id', ci.product_id).single()
+                    if (curP) {
+                      const newStock = Math.max(0, (curP.current_stock || 0) - qtyToDeduct)
+                      await supabase.from('products').update({ current_stock: newStock }).eq('id', ci.product_id)
+                      await supabase.from('inventory_movements').insert({
+                        product_id: ci.product_id,
+                        movement_type: 'SALE',
+                        quantity: qtyToDeduct,
+                        previous_stock: curP.current_stock,
+                        new_stock: newStock,
+                        reason: `POS Sale: Combo ${item.product_id} (${item.name})`,
+                        reference_id: invoice.id,
+                        performed_by: isValidUuid(user?.id) ? user.id : null,
+                      })
+                    }
+                  } catch (e) {
+                    console.warn('Combo item direct stock deduction error:', e)
+                  }
+                }
+              }
+            }
+          }
+          continue
+        }
+
+        if (item.isAccessory) {
+          try {
+            const { data: v } = await supabase.from('accessory_variants').select('quantity').eq('id', item.id).single()
+            if (v) {
+              const newQ = Math.max(0, (v.quantity || 0) - item.qty)
+              await supabase.from('accessory_variants').update({ quantity: newQ }).eq('id', item.id)
+            }
+          } catch (e) {}
+          continue
+        }
+
+        if (isValidUuid(item.id)) {
+          affectedProductIds.add(item.id)
+        }
+
         const { data: rpcResult, error: rpcErr } = await supabase.rpc('deduct_stock', {
           p_product_id:   item.id,
           p_quantity:     item.qty,
@@ -715,6 +914,15 @@ const Billing = () => {
             available: rpcResult?.available ?? 0,
             error: rpcResult?.error || 'Insufficient stock',
           })
+        }
+      }
+
+      // Synchronize combo allotted_qty for any combos containing products sold in this sale
+      if (affectedProductIds.size > 0) {
+        try {
+          await updateCombosAfterProductStockChange(Array.from(affectedProductIds), supabase)
+        } catch (comboErr) {
+          console.warn('Notice updating combo stock after sale:', comboErr)
         }
       }
 

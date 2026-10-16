@@ -15,6 +15,7 @@ const NavItem = ({ to, icon: Icon, label, badge, isCollapsed }) => (
     to={to}
     className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
     style={{ textDecoration: 'none' }}
+    title={isCollapsed ? `${label}${badge > 0 ? ` (${badge})` : ''}` : undefined}
   >
     <Icon size={18} strokeWidth={2} style={{ flexShrink: 0 }} />
     {!isCollapsed && <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>}
@@ -153,17 +154,19 @@ const Sidebar = ({ isCollapsed = false, toggleSidebar }) => {
 
         {/* Online Channel */}
         <div style={{ height: '8px' }} />
-        <div className="sidebar-section-label">Online Channel</div>
+        {!isCollapsed && <div className="sidebar-section-label">Online Channel</div>}
         <NavItem
           to="/online-orders"
           icon={Globe}
           label="Online Orders"
           badge={onlineOrdersCount}
+          isCollapsed={isCollapsed}
         />
         <NavItem
           to="/online-sales"
           icon={ShoppingBag}
           label="Manual Channel Sales"
+          isCollapsed={isCollapsed}
         />
 
         <div style={{ height: '8px' }} />

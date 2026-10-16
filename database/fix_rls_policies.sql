@@ -11,6 +11,15 @@ ALTER TABLE IF EXISTS inventory_movements DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS product_images DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS invoices DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS invoice_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS combos DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS combo_items DISABLE ROW LEVEL SECURITY;
+
+-- Alternatively, create open policies if RLS remains enabled
+DROP POLICY IF EXISTS "Allow full access on combos" ON combos;
+CREATE POLICY "Allow full access on combos" ON combos FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow full access on combo_items" ON combo_items;
+CREATE POLICY "Allow full access on combo_items" ON combo_items FOR ALL USING (true) WITH CHECK (true);
 
 -- Alternatively, create open policies if RLS remains enabled
 DROP POLICY IF EXISTS "Allow full access on categories" ON categories;

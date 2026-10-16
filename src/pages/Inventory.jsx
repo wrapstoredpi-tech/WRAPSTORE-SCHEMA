@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import ProductImageHover from '../components/common/ProductImageHover'
 import { getFormattedProductName } from '../lib/productUtils'
+import { updateCombosAfterProductStockChange } from '../lib/comboSync'
 
 const PAGE_SIZE = 15
 
@@ -113,6 +114,13 @@ const StockModal = ({ product, onClose, onSaved }) => {
       })
 
       if (movErr) throw movErr
+
+      // Auto-update allotted_qty for any combos that include this product
+      try {
+        await updateCombosAfterProductStockChange([product.id], supabase)
+      } catch (comboErr) {
+        console.warn('Notice syncing combo stock after inventory update:', comboErr)
+      }
 
       toast.success(`Stock updated: ${product.current_stock} → ${newStock}`)
       onSaved()

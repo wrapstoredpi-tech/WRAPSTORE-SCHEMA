@@ -15,6 +15,7 @@ import {
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { updateCombosAfterProductStockChange } from '../lib/comboSync'
 
 const INR = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -117,6 +118,15 @@ const LogSaleForm = ({ onSaved }) => {
         toast.success(
           `Sale logged! Stock: ${deductResult.previous_stock} → ${deductResult.new_stock}`
         )
+      }
+
+      // Auto-update allotted_qty for any combos that include this product
+      if (selectedProduct?.id) {
+        try {
+          await updateCombosAfterProductStockChange([selectedProduct.id], supabase)
+        } catch (comboErr) {
+          console.warn('Notice syncing combo stock after online sale:', comboErr)
+        }
       }
 
       // Note: inventory_movements.channel is set automatically by deduct_stock() RPC

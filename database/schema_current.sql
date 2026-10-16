@@ -484,13 +484,43 @@ FROM categories c WHERE c.slug = 'mobile-stickers'
 ON CONFLICT (category_id, slug) DO NOTHING;
 
 -- ============================================================
--- STORAGE BUCKETS (run separately if needed)
+-- 12. COMBOS & COMBO ITEMS
 -- ============================================================
--- INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
--- VALUES ('product-images', 'product-images', TRUE, 5242880,
---         ARRAY['image/jpeg','image/png','image/webp','image/gif','image/svg+xml'])
--- ON CONFLICT (id) DO NOTHING;
---
--- INSERT INTO storage.buckets (id, name, public)
--- VALUES ('invoices', 'invoices', FALSE)
--- ON CONFLICT DO NOTHING;
+CREATE SEQUENCE IF NOT EXISTS combo_code_seq START 1001;
+
+CREATE TABLE IF NOT EXISTS combos (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  combo_code      TEXT NOT NULL UNIQUE DEFAULT ('WS-CMB-' || nextval('combo_code_seq')::text),
+  code            TEXT,
+  name            TEXT NOT NULL,
+  description     TEXT,
+  selling_price   NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (selling_price >= 0),
+  original_value  NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (original_value >= 0),
+  items           JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by      UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_combos_code ON combos(combo_code);
+CREATE INDEX IF NOT EXISTS idx_combos_active ON combos(is_active);
+CREATE INDEX IF NOT EXISTS idx_combos_created_at ON combos(created_at DESC);
+ALTER TABLE combos DISABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS combo_items (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  combo_id        UUID NOT NULL REFERENCES combos(id) ON DELETE CASCADE,
+  product_id      UUID REFERENCES products(id) ON DELETE SET NULL,
+  product_name    TEXT NOT NULL,
+  product_code    TEXT,
+  mobile_model    TEXT,
+  allotted_qty    INT NOT NULL DEFAULT 1 CHECK (allotted_qty > 0),
+  unit_price      NUMERIC(10,2) NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_combo_items_combo ON combo_items(combo_id);
+CREATE INDEX IF NOT EXISTS idx_combo_items_product ON combo_items(product_id);
+ALTER TABLE combo_items DISABLE ROW LEVEL SECURITY;
+
