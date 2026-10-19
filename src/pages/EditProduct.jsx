@@ -112,6 +112,7 @@ const EditProduct = () => {
     mobile_model: product.mobile_model || '',
     color_variants: product.color_variants || '',
     collection: product.collection || '',
+    magsafe: product.magsafe === true || product.magsafe === 'Yes' || product.magsafe === 'true',
     description: product.description || '',
     purchase_price: product.purchase_price?.toString() || '',
     mrp: getMrp(product)?.toString() || '',

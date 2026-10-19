@@ -395,6 +395,15 @@ const ProductApproval = () => {
                       </div>
                     )}
 
+                    {p.magsafe != null && (
+                      <div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                          MagSafe
+                        </div>
+                        <div>{p.magsafe ? 'Yes' : 'No'}</div>
+                      </div>
+                    )}
+
                     <div>
                       <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
                         Pricing Details

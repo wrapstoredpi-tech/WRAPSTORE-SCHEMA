@@ -136,6 +136,7 @@ const INITIAL_STORE = {
       product_type: 'iphone_case', category_id: CAT_CASES_ID, subcategory_id: SUB_IPHONE_ID,
       mobile_brand: 'Apple', mobile_model: 'iPhone 16',
       description: 'Soft-touch silicone with MagSafe compatibility.',
+      collection: 'Midnight Series', magsafe: true,
       purchase_price: 130, selling_price: 319, discount_percentage: 0, gst_percentage: 18,
       current_stock: 0, min_stock_level: 8, approval_status: 'PENDING_APPROVAL',
       rejection_reason: null, approved_by: null, approved_at: null,

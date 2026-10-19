@@ -129,6 +129,8 @@ CREATE TABLE IF NOT EXISTS products (
   purchase_price      NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (purchase_price >= 0),
   selling_price       NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (selling_price >= 0),
   mrp                 NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (mrp >= 0),
+  collection          TEXT,
+  magsafe             BOOLEAN DEFAULT FALSE,
   discount_percentage NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (discount_percentage >= 0 AND discount_percentage <= 100),
   gst_percentage      NUMERIC(5,2) NOT NULL DEFAULT 18 CHECK (gst_percentage >= 0),
   current_stock       INT NOT NULL DEFAULT 0 CHECK (current_stock >= 0),
@@ -152,6 +154,8 @@ CREATE INDEX IF NOT EXISTS idx_products_approval ON products(approval_status);
 CREATE INDEX IF NOT EXISTS idx_products_brand ON products(mobile_brand);
 CREATE INDEX IF NOT EXISTS idx_products_model ON products(mobile_model);
 CREATE INDEX IF NOT EXISTS idx_products_stock ON products(current_stock);
+CREATE INDEX IF NOT EXISTS idx_products_collection ON products(collection);
+CREATE INDEX IF NOT EXISTS idx_products_magsafe ON products(magsafe);
 ALTER TABLE products DISABLE ROW LEVEL SECURITY;
 
 -- ============================================================

@@ -406,10 +406,27 @@ const Products = () => {
                           )}
                         </td>
                         <td>
-                          <span className="product-type-tag">
-                            <Smartphone size={10} />
-                            {formatProductType(p)}
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span className="product-type-tag">
+                              <Smartphone size={10} />
+                              {formatProductType(p)}
+                            </span>
+                            {(p.magsafe === true || p.magsafe === 'Yes' || p.magsafe === 'true') && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}>
+                                MagSafe
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                           {p.mobile_brand && <div style={{ fontWeight: 500 }}>{p.mobile_brand}</div>}

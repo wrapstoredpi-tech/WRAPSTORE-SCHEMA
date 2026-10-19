@@ -165,16 +165,24 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       : (shouldShowColourVariants ? (variantDraft.color || (selectedColors.length > variantsList.length ? selectedColors[variantsList.length] : selectedColors[0] || '')) : null)
 
     if (editingVariantId) {
-      setVariantsList(prev => prev.map(v => v.id === editingVariantId ? { ...variantDraft, color: assignedColor, id: editingVariantId } : v))
+      setVariantsList(prev => prev.map(v => v.id === editingVariantId ? {
+        ...variantDraft,
+        color: assignedColor || variantDraft.color || (selectedColors[0] || null),
+        images: (variantDraft.images && variantDraft.images.length > 0) ? variantDraft.images : images,
+        id: editingVariantId,
+      } : v))
       setEditingVariantId(null)
       toast.success('Product variant updated!')
     } else {
       const defaultProdTitle = form.name && form.name.trim() ? form.name.trim() : (isTemperedGlass ? 'Tempered Glass' : 'Product')
       const newVar = {
         ...variantDraft,
-        color: assignedColor,
+        color: assignedColor || variantDraft.color || (selectedColors[0] || null),
+        images: (variantDraft.images && variantDraft.images.length > 0) ? variantDraft.images : images,
         purchase_price: '0',
-        id: `variant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id: (productId || prefillData?.id) && variantsList.length === 0
+          ? `variant-existing-${productId || prefillData?.id}`
+          : `variant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         name: variantDraft.name.trim() || (assignedColor ? `${defaultProdTitle} - ${assignedColor}` : `${defaultProdTitle} ${variantsList.length + 1}`),
       }
       setVariantsList(prev => [...prev, newVar])
@@ -232,12 +240,14 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     mobile_brand: '',
     mobile_model: '',
     collection: '',
+    magsafe: false,
     description: '',
     selling_price: '',
     gst_percentage: '18',
     initial_stock: '',
     min_stock_level: '5',
     ...(prefillData || {}),
+    ...(prefillData ? { magsafe: prefillData.magsafe === true || prefillData.magsafe === 'Yes' || prefillData.magsafe === 'true' } : {}),
   })
 
   const [errors, setErrors] = useState({})
@@ -358,7 +368,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
             existing: true,
           })),
         }))
-        setVariantsList(mappedVars)
+        setVariantsList([])
         if (mappedVars[0]) setVariantDraft({ ...mappedVars[0] })
       } else {
         const initialVariant = {
@@ -378,7 +388,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         }
 
         setVariantDraft({ ...initialVariant })
-        setVariantsList([initialVariant])
+        setVariantsList([])
       }
     }
   }, [prefillData])
@@ -409,6 +419,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           mobile_brand: prodData.mobile_brand || '',
           mobile_model: prodData.mobile_model || '',
           collection: prodData.collection || '',
+          magsafe: prodData.magsafe === true || prodData.magsafe === 'Yes' || prodData.magsafe === 'true',
           description: prodData.description || '',
           purchase_price: prodData.purchase_price?.toString() || '',
           selling_price: prodData.selling_price?.toString() || '',
@@ -442,7 +453,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         }
 
         setVariantDraft({ ...initialVariant })
-        setVariantsList([initialVariant])
+        setVariantsList([])
         setIsLoading(false)
         return
       }
@@ -513,7 +524,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
             existing: true,
           })),
         }))
-        setVariantsList(mappedVars)
+        setVariantsList([])
         if (mappedVars[0]) setVariantDraft({ ...mappedVars[0] })
 
         const extractedColors = mappedVars.map(v => v.color).filter(Boolean)
@@ -749,6 +760,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       // Iterate through variants and create EACH variant as a single standalone product
       for (let i = 0; i < effectiveVariants.length; i++) {
         const v = effectiveVariants[i]
+        const targetId = (productId || prefillData?.id) && i === 0 ? (productId || prefillData?.id) : null
         const purchasePrice = 0
         const sellingPrice = Number(v.selling_price || 0)
         const mrpPrice = Number(v.mrp || 0)
@@ -763,7 +775,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           variantColor = v.name.trim()
         }
 
-        const prodName = generateProductName(v.name)
+        const prodName = (targetId && v.name && v.name.trim()) ? v.name.trim() : generateProductName(v.name)
 
         const payload = {
           name: prodName,
@@ -774,6 +786,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           mobile_model: selectedModels.length > 0 ? selectedModels.join(', ') : (form.mobile_model || null),
           color_variants: variantColor,
           collection: form.collection && form.collection.trim() ? form.collection.trim() : null,
+          magsafe: Boolean(form.magsafe),
           description: v.description || form.description || null,
           purchase_price: 0,
           selling_price: sellingPrice,
@@ -792,7 +805,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         let productUuid = null
         let isLocalFallback = false
 
-        const targetId = (productId || prefillData?.id) && i === 0 ? (productId || prefillData?.id) : null
         let data, error
         if (targetId) {
           const res = await supabase.from('products').update(payload).eq('id', targetId).select().single()
@@ -810,6 +822,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           let currentPayload = { ...payload }
           delete currentPayload.created_by
 
+          if (error.message?.includes('magsafe') || error.code === 'PGRST204') {
+            delete currentPayload.magsafe
+          }
           if (error.message?.includes('mrp') || error.code === 'PGRST204') {
             delete currentPayload.mrp
             if (mrpPrice > 0 && !currentPayload.description?.includes('MRP:')) {
@@ -819,8 +834,13 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           if (error.message?.includes('color_variants')) {
             delete currentPayload.color_variants
           }
+          if (error.message?.includes('collection')) {
+            delete currentPayload.collection
+          }
 
-          const retry = await supabase.from('products').insert(currentPayload).select().single()
+          const retry = targetId
+            ? await supabase.from('products').update(currentPayload).eq('id', targetId).select().single()
+            : await supabase.from('products').insert(currentPayload).select().single()
           if (retry.error) {
             const localUuid = `prod-local-${Date.now()}-${i}`
             const localRecord = {
@@ -1464,21 +1484,92 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                   </div>
                 ) : null}
 
-                {/* Collection Input */}
-                <div className="form-group" style={{ marginTop: '16px', marginBottom: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <label className="form-label" style={{ marginBottom: 0 }}>
-                      Collection
-                    </label>
+                {/* Collection & MagSafe Row */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '32px', marginTop: '16px', flexWrap: 'wrap' }}>
+                  {/* Collection Input */}
+                  <div className="form-group" style={{ flex: '1 1 340px', maxWidth: '400px', marginBottom: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>
+                        Collection
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Summer Collection, Anime Series, Leather Edition..."
+                      value={form.collection || ''}
+                      onChange={e => setForm(prev => ({ ...prev, collection: e.target.value }))}
+                      style={{ background: '#ffffff', width: '100%' }}
+                    />
                   </div>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. Summer Collection, Anime Series, Leather Edition..."
-                    value={form.collection || ''}
-                    onChange={e => setForm(prev => ({ ...prev, collection: e.target.value }))}
-                    style={{ background: '#ffffff', maxWidth: '400px' }}
-                  />
+
+                  {/* MagSafe Radio Options */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>
+                        MagSafe
+                      </label>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px', height: '38px' }}>
+                      <label
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          color: 'var(--text-primary)',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="magsafe"
+                          value="Yes"
+                          checked={form.magsafe === true}
+                          onChange={() => setForm(prev => ({ ...prev, magsafe: true }))}
+                          style={{
+                            cursor: 'pointer',
+                            accentColor: 'var(--brand-black, #111827)',
+                            width: '16px',
+                            height: '16px',
+                            margin: 0,
+                          }}
+                        />
+                        <span>Yes</span>
+                      </label>
+
+                      <label
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          color: 'var(--text-primary)',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="magsafe"
+                          value="No"
+                          checked={form.magsafe === false}
+                          onChange={() => setForm(prev => ({ ...prev, magsafe: false }))}
+                          style={{
+                            cursor: 'pointer',
+                            accentColor: 'var(--brand-black, #111827)',
+                            width: '16px',
+                            height: '16px',
+                            margin: 0,
+                          }}
+                        />
+                        <span>No</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Product Details Section Heading */}
@@ -1495,7 +1586,13 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                       className="form-input"
                       placeholder="Variant Name"
                       value={variantDraft.name}
-                      onChange={e => setVariantDraft(prev => ({ ...prev, name: e.target.value }))}
+                      onChange={e => {
+                        const val = e.target.value
+                        setVariantDraft(prev => ({ ...prev, name: val }))
+                        if (productId || prefillData) {
+                          setForm(prev => ({ ...prev, name: val }))
+                        }
+                      }}
                     />
                   </div>
                   {isAccessoriesCategory && (
@@ -1569,6 +1666,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                 <div style={{ display: 'flex', justifyContent: 'center', margin: '16px 0 8px 0' }}>
                   <button
                     type="button"
+                    id="add-product-variant-btn"
                     onClick={handleAddOrUpdateVariant}
                     style={{
                       padding: '9px 22px',
