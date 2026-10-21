@@ -113,6 +113,8 @@ const EditProduct = () => {
     color_variants: product.color_variants || '',
     collection: product.collection || '',
     magsafe: product.magsafe === true || product.magsafe === 'Yes' || product.magsafe === 'true',
+    mah: product.mah || '',
+    strap_mm: product.strap_mm || '',
     description: product.description || '',
     purchase_price: product.purchase_price?.toString() || '',
     mrp: getMrp(product)?.toString() || '',

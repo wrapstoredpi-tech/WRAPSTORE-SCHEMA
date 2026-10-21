@@ -157,12 +157,24 @@ const Products = () => {
     const localProds = getLocalProducts().filter(p => {
       if (p.is_active === false) return false
       if (statusFilter) return p.approval_status === statusFilter
-      return p.approval_status === 'APPROVED' || !p.approval_status
+      return true
     })
 
-    const merged = [...accProds, ...dbProds]
+    const merged = [...accProds, ...dbProds].map(p => {
+      const lp = localProds.find(l => l.id === p.id || (l.product_id && l.product_id === p.product_id) || (p.name && l.name && p.name.toLowerCase() === l.name.toLowerCase()))
+      if (lp) {
+        return {
+          ...p,
+          mah: p.mah || lp.mah || null,
+          strap_mm: p.strap_mm || lp.strap_mm || null,
+          mrp: p.mrp || lp.mrp || null,
+          magsafe: p.magsafe != null ? p.magsafe : lp.magsafe,
+        }
+      }
+      return p
+    })
     for (const lp of localProds) {
-      if (!merged.some(p => p.id === lp.id || p.name.toLowerCase() === lp.name.toLowerCase())) {
+      if (!merged.some(p => p.id === lp.id || (p.product_id && p.product_id === lp.product_id) || (p.name && lp.name && p.name.toLowerCase() === lp.name.toLowerCase()))) {
         merged.unshift(lp)
       }
     }
@@ -424,6 +436,36 @@ const Products = () => {
                                 alignItems: 'center',
                               }}>
                                 MagSafe
+                              </span>
+                            )}
+                            {p.mah && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                background: '#ecfdf5',
+                                color: '#047857',
+                                border: '1px solid #a7f3d0',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}>
+                                {p.mah}
+                              </span>
+                            )}
+                            {p.strap_mm && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}>
+                                {p.strap_mm.includes('mm') ? p.strap_mm : `${p.strap_mm}mm`}
                               </span>
                             )}
                           </div>

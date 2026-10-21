@@ -85,9 +85,21 @@ const ProductApproval = () => {
 
     const localPending = getLocalProducts().filter(p => p.approval_status === 'PENDING_APPROVAL' && p.is_active !== false)
 
-    const merged = [...dbProds]
+    const merged = dbProds.map(dbP => {
+      const lp = localPending.find(l => l.id === dbP.id || (l.product_id && l.product_id === dbP.product_id) || (dbP.name && l.name && dbP.name.toLowerCase() === l.name.toLowerCase()))
+      if (lp) {
+        return {
+          ...dbP,
+          mah: dbP.mah || lp.mah || null,
+          strap_mm: dbP.strap_mm || lp.strap_mm || null,
+          mrp: dbP.mrp || lp.mrp || null,
+          magsafe: dbP.magsafe != null ? dbP.magsafe : lp.magsafe,
+        }
+      }
+      return dbP
+    })
     for (const lp of localPending) {
-      if (!merged.some(p => p.id === lp.id)) {
+      if (!merged.some(p => p.id === lp.id || (p.product_id && p.product_id === lp.product_id))) {
         merged.unshift(lp)
       }
     }
@@ -272,6 +284,8 @@ const ProductApproval = () => {
                       Submitted by {p.profiles?.full_name || p.profiles?.email || 'Store Manager'} ·{' '}
                       {new Date(p.created_at || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                       {p.mobile_model && ` · ${p.mobile_model}`}
+                      {p.mah && ` · ${p.mah}`}
+                      {p.strap_mm && ` · ${p.strap_mm.includes('mm') ? p.strap_mm : `${p.strap_mm}mm`}`}
                     </div>
                   </div>
 
@@ -401,6 +415,24 @@ const ProductApproval = () => {
                           MagSafe
                         </div>
                         <div>{p.magsafe ? 'Yes' : 'No'}</div>
+                      </div>
+                    )}
+
+                    {p.mah && (
+                      <div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                          Capacity (mAh)
+                        </div>
+                        <div>{p.mah}</div>
+                      </div>
+                    )}
+
+                    {p.strap_mm && (
+                      <div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                          Strap Size
+                        </div>
+                        <div>{p.strap_mm.includes('mm') ? p.strap_mm : `${p.strap_mm}mm`}</div>
                       </div>
                     )}
 
