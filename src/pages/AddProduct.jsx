@@ -8,26 +8,35 @@ import { fetchMergedCategories } from '../lib/categoryStorage'
 import { getMrp } from '../lib/productUtils'
 
 const IPHONE_MODELS = [
+  'iPhone Duo',
   'iPhone 18 Pro Max', 'iPhone 18 Pro', 'iPhone 18 Plus', 'iPhone 18',
   'iPhone 17 Pro Max', 'iPhone 17 Pro', 'iPhone 17 Plus', 'iPhone 17',
-  'iPhone 16 Pro Max', 'iPhone 16 Pro', 'iPhone 16 Plus', 'iPhone 16',
+  'iPhone 16 Pro Max', 'iPhone 16 Pro', 'iPhone 16 Plus', 'iPhone 16', 'iPhone 16e',
   'iPhone 15 Pro Max', 'iPhone 15 Pro', 'iPhone 15 Plus', 'iPhone 15',
   'iPhone 14 Pro Max', 'iPhone 14 Pro', 'iPhone 14 Plus', 'iPhone 14',
   'iPhone 13 Pro Max', 'iPhone 13 Pro', 'iPhone 13 Mini', 'iPhone 13',
   'iPhone 12 Pro Max', 'iPhone 12 Pro', 'iPhone 12 Mini', 'iPhone 12',
   'iPhone 11 Pro Max', 'iPhone 11 Pro', 'iPhone 11',
-  'iPhone SE (3rd Gen)', 'iPhone SE (2nd Gen)',
+  'iPhone XS Max', 'iPhone XS', 'iPhone XR', 'iPhone X',
+  'iPhone SE (3rd Gen)', 'iPhone SE (2nd Gen)', 'iPhone SE (1st Gen)',
+  'iPhone 8 Plus', 'iPhone 8',
+  'iPhone 7 Plus', 'iPhone 7',
+  'iPhone 6s Plus', 'iPhone 6s', 'iPhone 6 Plus', 'iPhone 6',
+  'iPhone 5s', 'iPhone 5c', 'iPhone 5',
+  'iPhone 4s', 'iPhone 4',
+  'iPhone 3GS', 'iPhone 3G', 'iPhone (1st Gen)',
 ]
 
 const IPHONE_SERIES = [
-  { label: 'All Models', filter: () => IPHONE_MODELS },
-  { label: 'iPhone 13 to 18 Series', filter: () => IPHONE_MODELS.filter(m => /iPhone (1[3-8])/.test(m)) },
   { label: 'iPhone 18 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 18')) },
   { label: 'iPhone 17 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 17')) },
   { label: 'iPhone 16 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 16')) },
   { label: 'iPhone 15 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 15')) },
   { label: 'iPhone 14 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 14')) },
   { label: 'iPhone 13 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 13')) },
+  { label: 'iPhone 12 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 12')) },
+  { label: 'iPhone 11 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 11')) },
+  { label: 'iPhone Duo', filter: () => IPHONE_MODELS.filter(m => m.toLowerCase().includes('duo')) },
 ]
 
 const IPAD_MODELS = [
@@ -241,13 +250,15 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
   const handleEditVariant = (variant) => {
     setEditingVariantId(variant.id)
+    const rawModel = variant.model || variant.mobile_model || ''
     setVariantDraft({
       ...variant,
-      model: variant.model || variant.mobile_model || '',
+      model: rawModel,
       color: variant.color || variant.color_variants || '',
       mah: variant.mah || '',
       strap_mm: variant.strap_mm || '',
     })
+    setSelectedModels(parseModels(rawModel))
     if (isTemperedGlass && variant.color) {
       if (variant.color.includes('Borderless')) setTemperedBorder('Borderless')
       else if (variant.color.includes('Border')) setTemperedBorder('Border')
@@ -384,13 +395,13 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
   const [selectedModels, setSelectedModels] = useState(() => parseModels(prefillData?.mobile_model))
   const [modelSearch, setModelSearch] = useState('')
-  const [activeSeriesIdx, setActiveSeriesIdx] = useState(2)
+  const [activeSeriesIdx, setActiveSeriesIdx] = useState(0)
 
   useEffect(() => {
     if (form.mobile_brand === 'Apple' || form.product_type === 'iphone_case') {
-      setActiveSeriesIdx(2) // iPhone 18 Series
+      setActiveSeriesIdx(0) // iPhone 18 Series
     } else if (form.mobile_brand === 'Samsung' || form.product_type === 'samsung_case') {
-      setActiveSeriesIdx(1) // Galaxy S25 Series
+      setActiveSeriesIdx(0) // Galaxy S25 Series
     } else {
       setActiveSeriesIdx(0)
     }
@@ -634,24 +645,33 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     }))
   }
 
-  // Model Selection Handlers
+  // Model Selection Handlers (supports multiple models)
   const toggleModel = (m) => {
-    setSelectedModels(prev =>
-      prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]
-    )
+    const current = parseModels(variantDraft.model)
+    const updated = current.includes(m)
+      ? current.filter(x => x !== m)
+      : [...current, m]
+    const updatedStr = updated.join(', ')
+    setVariantDraft(prev => ({ ...prev, model: updatedStr }))
+    setSelectedModels(updated)
   }
 
   const handleSeriesToggle = (filterFn) => {
-    const modelsInSeries = filterFn()
-    const allSelected = modelsInSeries.every(m => selectedModels.includes(m))
-    if (allSelected) {
-      setSelectedModels(prev => prev.filter(m => !modelsInSeries.includes(m)))
-    } else {
-      setSelectedModels(prev => Array.from(new Set([...prev, ...modelsInSeries])))
-    }
+    const current = parseModels(variantDraft.model)
+    const modelsInSeries = typeof filterFn === 'function' ? filterFn() : []
+    const allSelected = modelsInSeries.length > 0 && modelsInSeries.every(m => current.includes(m))
+    const updated = allSelected
+      ? current.filter(m => !modelsInSeries.includes(m))
+      : Array.from(new Set([...current, ...modelsInSeries]))
+    const updatedStr = updated.join(', ')
+    setVariantDraft(prev => ({ ...prev, model: updatedStr }))
+    setSelectedModels(updated)
   }
 
-  const clearAllModels = () => setSelectedModels([])
+  const clearAllModels = () => {
+    setVariantDraft(prev => ({ ...prev, model: '' }))
+    setSelectedModels([])
+  }
 
   // Color Selection Handlers
   const toggleColor = (color) => {
@@ -1456,30 +1476,122 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                         <label className="form-label" style={{ marginBottom: 0 }}>
                           Model <span className="required">*</span>
                         </label>
-                        {variantDraft.model && (
-                          <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>
-                            ✓ {variantDraft.model}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {parseModels(variantDraft.model).length > 0 && (
+                            <button
+                              type="button"
+                              id="clear-all-models-btn"
+                              onClick={clearAllModels}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-muted)',
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                                textDecoration: 'underline',
+                                padding: 0,
+                              }}
+                            >
+                              Clear all
+                            </button>
+                          )}
+                          {parseModels(variantDraft.model).length > 0 && (
+                            <span id="selected-models-count" style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>
+                              ✓ {parseModels(variantDraft.model).length === 1 ? parseModels(variantDraft.model)[0] : `${parseModels(variantDraft.model).length} Models Selected`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Selected Models Badges Display */}
+                      <div
+                        id="selected-models-container"
+                        style={{
+                          background: '#ffffff',
+                          minHeight: '38px',
+                          border: !variantDraft.model && errors.mobile_model ? '1.5px solid var(--danger)' : '1px solid var(--border-strong)',
+                          borderRadius: 'var(--radius)',
+                          padding: '6px 10px',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '6px',
+                          alignItems: 'center',
+                          marginBottom: '8px',
+                        }}
+                      >
+                        {parseModels(variantDraft.model).length === 0 ? (
+                          <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                            Click pills below or choose from dropdown to select models (multiple allowed)
                           </span>
+                        ) : (
+                          parseModels(variantDraft.model).map(m => (
+                            <span
+                              key={m}
+                              id={`selected-badge-${m.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                background: '#111827',
+                                color: '#ffffff',
+                                padding: '3px 9px',
+                                borderRadius: 'var(--radius-full)',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                              }}
+                            >
+                              <span>✓ {m}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toggleModel(m)
+                                }}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: '#d1d5db',
+                                  cursor: 'pointer',
+                                  padding: 0,
+                                  fontSize: '13px',
+                                  lineHeight: 1,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                }}
+                                title={`Remove ${m}`}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))
                         )}
                       </div>
 
-                      {/* Model Dropdown */}
+                      {/* Model Dropdown to quickly pick additional models */}
                       <select
+                        id="model-dropdown-select"
                         className="form-select"
-                        value={variantDraft.model || ''}
-                        onChange={e => setVariantDraft(prev => ({ ...prev, model: e.target.value }))}
+                        value=""
+                        onChange={e => {
+                          if (e.target.value) {
+                            toggleModel(e.target.value)
+                            e.target.value = ''
+                          }
+                        }}
                         style={{
                           background: '#ffffff',
                           fontSize: '13px',
                           height: '38px',
                           marginBottom: '8px',
-                          border: !variantDraft.model && errors.mobile_model ? '1.5px solid var(--danger)' : undefined,
+                          color: '#374151',
                         }}
                       >
-                        <option value="">Select compatible model...</option>
-                        {modelOptions.map(m => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
+                        <option value="">+ Add model from dropdown...</option>
+                        {modelOptions
+                          .filter(m => !parseModels(variantDraft.model).includes(m))
+                          .map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
                       </select>
 
                       {/* Quick Series & Model Select Pills */}
@@ -1503,6 +1615,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                               return (
                                 <button
                                   key={idx}
+                                  id={`series-btn-${idx}`}
                                   type="button"
                                   onClick={() => setActiveSeriesIdx(idx)}
                                   style={{
@@ -1523,22 +1636,48 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                             })}
                           </div>
 
-                          {/* Line separating below iPhone 13 */}
+                          {/* Line separating below Series */}
                           <div style={{ width: '100%', height: '1px', background: 'var(--border)', margin: '4px 0' }} />
 
-                          {/* Variant Label & Quick Model Pills */}
+                          {/* Variant Label, Quick Series Toggle & Quick Model Pills */}
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                              Variant:
-                            </span>
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', maxHeight: '110px', overflowY: 'auto' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                VARIANT (SELECT MULTIPLE):
+                              </span>
+                              {activeSeriesIdx >= 0 && seriesOptions[activeSeriesIdx] && (
+                                <button
+                                  type="button"
+                                  id="toggle-series-selection-btn"
+                                  onClick={() => handleSeriesToggle(seriesOptions[activeSeriesIdx]?.filter || (() => []))}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--brand-black, #111827)',
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    textDecoration: 'underline',
+                                    padding: 0,
+                                  }}
+                                >
+                                  {(seriesOptions[activeSeriesIdx]?.filter() || []).length > 0 &&
+                                   (seriesOptions[activeSeriesIdx]?.filter() || []).every(m => parseModels(variantDraft.model).includes(m))
+                                    ? 'Deselect series'
+                                    : 'Select all in series'}
+                                </button>
+                              )}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', maxHeight: '130px', overflowY: 'auto' }}>
                               {(seriesOptions[activeSeriesIdx]?.filter() || modelOptions).map(m => {
-                                const isSelected = variantDraft.model === m
+                                const isSelected = parseModels(variantDraft.model).includes(m)
                                 return (
                                   <button
                                     key={m}
+                                    id={`model-pill-${m.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
                                     type="button"
-                                    onClick={() => setVariantDraft(prev => ({ ...prev, model: m }))}
+                                    onClick={() => toggleModel(m)}
                                     style={{
                                       fontSize: '11px',
                                       padding: '4px 10px',
@@ -2019,8 +2158,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                             )}
                             {shouldShowModelSelection && (
                               <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
-                                <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', background: '#eff6ff', color: '#1d4ed8', fontWeight: 700, border: '1px solid #bfdbfe' }}>
-                                  {variant.model || '—'}
+                                <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', background: '#eff6ff', color: '#1d4ed8', fontWeight: 700, border: '1px solid #bfdbfe' }} title={variant.model || ''}>
+                                  {variant.model
+                                    ? (variant.model.split(',').length > 2
+                                      ? `${variant.model.split(',').slice(0, 2).map(s => s.trim()).join(', ')} (+${variant.model.split(',').length - 2} more)`
+                                      : variant.model)
+                                    : '—'}
                                 </span>
                               </td>
                             )}
