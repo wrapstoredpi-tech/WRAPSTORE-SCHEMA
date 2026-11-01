@@ -22,7 +22,7 @@ const MOVEMENT_TYPES = [
   { value: 'CUSTOMER_RETURN', label: 'Customer Return', icon: RotateCcw, color: 'var(--success)' },
 ]
 
-const POSITIVE_TYPES = ['ADD_STOCK', 'INITIAL_STOCK', 'CUSTOMER_RETURN']
+const POSITIVE_TYPES = ['ADD_STOCK', 'INITIAL_STOCK', 'CUSTOMER_RETURN', 'ONLINE_RETURN', 'RESERVATION_RELEASED']
 
 const MOVEMENT_LABELS = {
   ADD_STOCK: 'Stock Added',
@@ -31,12 +31,17 @@ const MOVEMENT_LABELS = {
   MANUAL_ADJUSTMENT: 'Manual Adjustment',
   DAMAGED: 'Damaged',
   CUSTOMER_RETURN: 'Customer Return',
-  SALE: 'Sale',
+  SALE: 'POS Sale',
+  ONLINE_SALE: 'Online Website Sale',
+  ONLINE_RETURN: 'Online Return / Restocked',
+  STOCK_RESERVED: 'Checkout Reserved',
+  RESERVATION_RELEASED: 'Reservation Released',
 }
 
 const getStockStatus = (p) => {
-  if (p.current_stock === 0) return { label: 'OUT OF STOCK', class: 'badge-danger', dot: 'var(--danger)' }
-  if (p.current_stock <= p.min_stock_level) return { label: 'LOW STOCK', class: 'badge-warning', dot: 'var(--warning)' }
+  const avail = p.current_stock - (Number(p.reserved_stock) || 0)
+  if (avail <= 0 || p.current_stock === 0) return { label: 'OUT OF STOCK', class: 'badge-danger', dot: 'var(--danger)' }
+  if (avail <= p.min_stock_level) return { label: 'LOW STOCK', class: 'badge-warning', dot: 'var(--warning)' }
   return { label: 'IN STOCK', class: 'badge-success', dot: 'var(--success)' }
 }
 
@@ -96,10 +101,6 @@ const StockModal = ({ product, onClose, onSaved }) => {
       if (updateErr) throw updateErr
 
       // Record movement
-      const qty = isAdjustment
-        ? newStock - product.current_stock  // record the delta
-        : (isAddition ? Number(quantity) : -Number(quantity))
-
       const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
       const validUserUuid = isValidUuid(user?.id) ? user.id : null
 
@@ -314,11 +315,16 @@ const HistoryModal = ({ product, onClose }) => {
                       : <Minus size={13} color="var(--danger)" />}
                   </div>
                   <div className="movement-details">
-                    <div className="movement-type">{MOVEMENT_LABELS[m.movement_type]}</div>
+                    <div className="movement-type">{MOVEMENT_LABELS[m.movement_type] || m.movement_type}</div>
                     <div className="movement-meta">
                       {m.previous_stock} → {m.new_stock} units · {formatDate(m.created_at)}
                     </div>
                     {m.reason && <div className="movement-meta">"{m.reason}"</div>}
+                    {m.reference_id && (
+                      <div className="movement-meta" style={{ fontSize: '11px', fontFamily: 'monospace' }}>
+                        Ref: {m.reference_id}
+                      </div>
+                    )}
                     <div className="movement-meta" style={{ fontSize: '11px' }}>
                       by {m.profiles?.full_name || m.profiles?.email || 'System'}
                     </div>
@@ -385,14 +391,17 @@ const Inventory = () => {
   const fetchSummaryMetrics = async () => {
     const { data: allProds } = await supabase
       .from('products')
-      .select('current_stock, selling_price, min_stock_level')
+      .select('current_stock, reserved_stock, selling_price, min_stock_level')
       .eq('approval_status', 'APPROVED')
       .eq('is_active', true)
 
     const list = allProds || []
     const inventoryValue = list.reduce((s, p) => s + Number(p.current_stock || 0) * Number(p.selling_price || 0), 0)
-    const lowStockCount = list.filter(p => Number(p.current_stock || 0) > 0 && Number(p.current_stock || 0) <= Number(p.min_stock_level || 5)).length
-    const outOfStockCount = list.filter(p => Number(p.current_stock || 0) === 0).length
+    const lowStockCount = list.filter(p => {
+      const avail = Number(p.current_stock || 0) - (Number(p.reserved_stock) || 0)
+      return avail > 0 && avail <= Number(p.min_stock_level || 5)
+    }).length
+    const outOfStockCount = list.filter(p => (Number(p.current_stock || 0) - (Number(p.reserved_stock) || 0)) <= 0).length
 
     setSummaryData({
       inventoryValue,
@@ -425,11 +434,17 @@ const Inventory = () => {
     const { data, count } = await query
     let filtered = data || []
 
-    // Client-side low/in-stock filtering
+    // Client-side low/in-stock filtering based on available stock
     if (stockFilter === 'low') {
-      filtered = filtered.filter(p => p.current_stock > 0 && p.current_stock <= p.min_stock_level)
+      filtered = filtered.filter(p => {
+        const avail = p.current_stock - (Number(p.reserved_stock) || 0)
+        return avail > 0 && avail <= p.min_stock_level
+      })
     } else if (stockFilter === 'in') {
-      filtered = filtered.filter(p => p.current_stock > p.min_stock_level)
+      filtered = filtered.filter(p => {
+        const avail = p.current_stock - (Number(p.reserved_stock) || 0)
+        return avail > p.min_stock_level
+      })
     }
 
     setProducts(filtered)
@@ -460,7 +475,7 @@ const Inventory = () => {
       <div className="section-header">
         <div>
           <div className="section-title">Inventory</div>
-          <div className="section-subtitle">{total} approved products tracked</div>
+          <div className="section-subtitle">{total} approved products tracked (including online reserved stock)</div>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={() => { fetchInventory(); fetchSummaryMetrics() }}>
           <RefreshCw size={13} /> Refresh
@@ -572,6 +587,7 @@ const Inventory = () => {
                     const imgUrl = getPrimaryImage(p.product_images)
                     const status = getStockStatus(p)
                     const displayName = getFormattedProductName(p)
+                    const availStock = Math.max(0, p.current_stock - (Number(p.reserved_stock) || 0))
                     return (
                       <tr key={p.id}>
                         <td>
@@ -619,9 +635,18 @@ const Inventory = () => {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: status.dot, flexShrink: 0 }} />
                             <span style={{ fontWeight: 800, fontSize: '15px' }}>{p.current_stock}</span>
+                            {Number(p.reserved_stock || 0) > 0 && (
+                              <span style={{
+                                fontSize: '10px', background: '#fef3c7', color: '#92400e',
+                                border: '1px solid #fcd34d', padding: '1px 5px', borderRadius: 4, fontWeight: 700
+                              }}>
+                                {p.reserved_stock} res.
+                              </span>
+                            )}
                           </div>
-                          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '1px' }}>
-                            min {p.min_stock_level}
+                          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '1px', display: 'flex', gap: 6 }}>
+                            <span>Avail: <strong>{availStock}</strong></span>
+                            <span>· min {p.min_stock_level}</span>
                           </div>
                         </td>
                         <td>

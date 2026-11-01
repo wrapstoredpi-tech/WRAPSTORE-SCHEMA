@@ -237,3 +237,4 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 GRANT EXECUTE ON FUNCTION cancel_and_restock_online_order(UUID, TEXT) TO authenticated, anon;
+
