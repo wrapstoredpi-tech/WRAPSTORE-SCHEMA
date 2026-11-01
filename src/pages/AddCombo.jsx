@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   PackagePlus, Plus, Search, Trash2, Check, X,
   ShoppingBag, ShieldCheck, Layers, ArrowLeft,
-  Info, History, Tag, Smartphone, Sparkles, Lock, AlertTriangle
+  Info, History, Tag, Smartphone, Sparkles, Lock, AlertTriangle,
+  Image as ImageIcon, UploadCloud
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
@@ -43,6 +44,11 @@ const AddCombo = () => {
   const [selectedItems, setSelectedItems] = useState([]) // Array of { product, allottedQty }
   const [savingCombo, setSavingCombo] = useState(false)
 
+  // Dedicated Combo Representative Image State (Shown on Website)
+  const [comboImages, setComboImages] = useState([]) // Array of { id, file, preview, isPrimary }
+  const [uploadingComboImage, setUploadingComboImage] = useState(false)
+  const comboFileInputRef = useRef(null)
+
   // Fetch saved combos from DB with live stock reconciliation & localStorage fallback
   const fetchCombos = async () => {
     try {
@@ -52,7 +58,7 @@ const AddCombo = () => {
         const formatted = reconciled.map(c => ({
           ...c,
           id: c.id,
-          code: c.combo_code || c.code || `WS-CMB-${c.id.slice(0, 4)}`,
+          code: c.combo_code || c.code || `WS-CMB-${String(c.id || '').slice(0, 4)}`,
           combo_code: c.combo_code || c.code,
           name: c.name,
           description: c.description,
@@ -75,7 +81,7 @@ const AddCombo = () => {
         const formatted = data.map(c => ({
           ...c,
           id: c.id,
-          code: c.combo_code || c.code || `WS-CMB-${c.id.slice(0, 4)}`,
+          code: c.combo_code || c.code || `WS-CMB-${String(c.id || '').slice(0, 4)}`,
           combo_code: c.combo_code || c.code,
           name: c.name,
           description: c.description,
@@ -139,7 +145,111 @@ const AddCombo = () => {
     setSelectedItems([])
     setProductSearch('')
     setSelectedCategory('ALL')
+    setComboImages([])
     setIsModalOpen(true)
+  }
+
+  // File selection for Combo Representative Image
+  const handleSelectComboFiles = (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    const validFiles = []
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) {
+        toast.error(`"${file.name}" is not an image file`)
+        continue
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error(`"${file.name}" exceeds the 5MB size limit`)
+        continue
+      }
+      validFiles.push(file)
+    }
+
+    if (validFiles.length === 0) return
+
+    const newObjs = validFiles.map((file, idx) => ({
+      id: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+      file,
+      preview: URL.createObjectURL(file),
+      isPrimary: comboImages.length === 0 && idx === 0,
+    }))
+
+    setComboImages(prev => [...prev, ...newObjs])
+    if (comboFileInputRef.current) comboFileInputRef.current.value = ''
+  }
+
+  const handleRemoveComboImage = (indexToRemove) => {
+    setComboImages(prev => {
+      const removed = prev[indexToRemove]
+      if (removed?.preview && removed.preview.startsWith('blob:')) {
+        try { URL.revokeObjectURL(removed.preview) } catch (e) {}
+      }
+      const next = prev.filter((_, idx) => idx !== indexToRemove)
+      if (removed?.isPrimary && next.length > 0) {
+        next[0].isPrimary = true
+      }
+      return next
+    })
+  }
+
+  const handleSetPrimaryComboImage = (indexToPrimary) => {
+    setComboImages(prev =>
+      prev.map((img, idx) => ({
+        ...img,
+        isPrimary: idx === indexToPrimary,
+      }))
+    )
+  }
+
+  const uploadComboImages = async (comboId) => {
+    const results = []
+    if (!comboImages || comboImages.length === 0) return results
+
+    for (let i = 0; i < comboImages.length; i++) {
+      const img = comboImages[i]
+      const isPrimary = img.isPrimary || i === 0
+
+      if (img.file) {
+        const ext = (img.file.name || 'image.png').split('.').pop()
+        const storagePath = `combos/${comboId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+
+        const { error: uploadErr } = await supabase.storage
+          .from('product-images')
+          .upload(storagePath, img.file, {
+            contentType: img.file.type || 'image/jpeg',
+            cacheControl: '3600',
+            upsert: true,
+          })
+
+        if (uploadErr) {
+          console.error('Combo image upload error:', uploadErr)
+          toast.error(`Image upload failed: ${uploadErr.message}`)
+          continue
+        }
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('product-images')
+          .getPublicUrl(storagePath)
+
+        results.push({
+          url: publicUrl,
+          public_url: publicUrl,
+          storage_path: storagePath,
+          is_primary: isPrimary,
+          sort_order: i,
+        })
+      } else if (img.preview && typeof img.preview === 'string' && img.preview.startsWith('http')) {
+        results.push({
+          url: img.preview,
+          public_url: img.preview,
+          is_primary: isPrimary,
+          sort_order: i,
+        })
+      }
+    }
+    return results
   }
 
   const handleToggleProduct = (product) => {
@@ -194,6 +304,25 @@ const AddCombo = () => {
       const comboId = generateUUID()
       const comboCode = `WS-CMB-${Math.floor(1000 + Math.random() * 9000)}`
 
+      // Upload custom representative combo images if provided
+      let uploadedComboImages = []
+      if (comboImages.length > 0) {
+        setUploadingComboImage(true)
+        try {
+          uploadedComboImages = await uploadComboImages(comboId)
+        } catch (imgErr) {
+          console.warn('Combo image upload warning:', imgErr)
+        } finally {
+          setUploadingComboImage(false)
+        }
+      }
+
+      const primaryComboImageUrl =
+        uploadedComboImages.find(i => i.is_primary)?.public_url ||
+        uploadedComboImages[0]?.public_url ||
+        null
+      const allComboImageUrls = uploadedComboImages.map(i => i.public_url)
+
       const comboItemsSnapshot = selectedItems.map(i => ({
         product_id: i.product.id,
         product_name: i.product.name,
@@ -202,6 +331,8 @@ const AddCombo = () => {
         unit_price: Number(i.product.selling_price) || 0,
         allotted_qty: maxPossibleCombos,
         image: i.product.product_images?.find(img => img.is_primary)?.public_url || i.product.product_images?.[0]?.public_url || null,
+        combo_image: primaryComboImageUrl,
+        combo_images: allComboImageUrls,
       }))
 
       // 1. Insert row into public.combos table in database
@@ -221,11 +352,26 @@ const AddCombo = () => {
         created_by: isValidUuid(user?.id) ? user.id : null,
       }
 
-      const { data: dbData, error: dbErr } = await supabase
+      if (primaryComboImageUrl) {
+        comboRow.image_url = primaryComboImageUrl
+        comboRow.images = allComboImageUrls
+      }
+
+      let { data: dbData, error: dbErr } = await supabase
         .from('combos')
         .insert(comboRow)
         .select()
         .single()
+
+      if (dbErr && dbErr.message && dbErr.message.includes('column')) {
+        // Fallback: table doesn't have image_url column yet, but combo_image is safely embedded in items JSONB
+        const fallbackRow = { ...comboRow }
+        delete fallbackRow.image_url
+        delete fallbackRow.images
+        const retry = await supabase.from('combos').insert(fallbackRow).select().single()
+        dbData = retry.data
+        dbErr = retry.error
+      }
 
       if (dbErr) {
         console.warn('Combos DB insert notice:', dbErr.message)
@@ -320,12 +466,14 @@ const AddCombo = () => {
       } else {
         toast.success(`Combo "${comboName.trim()}" created locally (table pending in DB).`)
       }
+      setComboImages([])
       setIsModalOpen(false)
     } catch (err) {
       console.error('Error creating combo:', err)
       toast.error(err.message || 'Failed to create combo')
     } finally {
       setSavingCombo(false)
+      setUploadingComboImage(false)
     }
   }
 
@@ -563,6 +711,37 @@ const AddCombo = () => {
                 </div>
 
                 <div className="card-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {/* Dedicated Combo Representative Image Banner */}
+                  {(() => {
+                    const comboBanner = combo.image_url || combo.items?.[0]?.combo_image || (Array.isArray(combo.images) && (combo.images[0]?.public_url || combo.images[0])) || null
+                    if (!comboBanner) return null
+                    return (
+                      <div style={{
+                        position: 'relative',
+                        height: '140px',
+                        borderRadius: 'var(--radius)',
+                        overflow: 'hidden',
+                        background: '#f3f4f6',
+                        border: '1px solid var(--border)',
+                      }}>
+                        <img
+                          src={comboBanner}
+                          alt={combo.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                        <span style={{
+                          position: 'absolute', bottom: 6, right: 6,
+                          background: 'rgba(17, 24, 39, 0.75)', color: '#ffffff',
+                          backdropFilter: 'blur(4px)',
+                          fontSize: '10px', fontWeight: 700, padding: '2px 8px',
+                          borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px'
+                        }}>
+                          <ImageIcon size={10} /> Website Hero Image
+                        </span>
+                      </div>
+                    )
+                  })()}
+
                   <div>
                     <h4 style={{ fontSize: '15px', fontWeight: 800, margin: '0 0 4px' }}>{combo.name}</h4>
                     {combo.description && (
@@ -1015,6 +1194,186 @@ const AddCombo = () => {
                     </div>
                   </div>
                 )}
+              
+                {/* ── COMBO REPRESENTATIVE IMAGE UPLOAD SECTION (SHOWN ON WEBSITE) ── */}
+                <div style={{
+                  background: '#ffffff',
+                  border: '1.5px solid #e5e7eb',
+                  borderRadius: 'var(--radius)',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{
+                        width: '34px', height: '34px', borderRadius: '8px',
+                        background: '#eff6ff', color: '#2563eb',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}>
+                        <ImageIcon size={18} />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '13px', color: 'var(--brand-black)' }}>
+                          Combo Representative Image <span style={{ color: '#2563eb', fontWeight: 700 }}>(Shown on Website)</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          Upload the hero image/bundle photo that will represent this combo on the website.
+                        </div>
+                      </div>
+                    </div>
+
+                    {comboImages.length > 0 && (
+                      <span style={{
+                        fontSize: '11px', fontWeight: 700, color: '#2563eb',
+                        background: '#eff6ff', padding: '3px 10px', borderRadius: '12px',
+                        border: '1px solid #bfdbfe'
+                      }}>
+                        {comboImages.length} Image{comboImages.length > 1 ? 's' : ''} Selected
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Hidden File Input */}
+                  <input
+                    ref={comboFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={handleSelectComboFiles}
+                  />
+
+                  {/* Dropzone / Upload area */}
+                  {comboImages.length === 0 ? (
+                    <div
+                      onClick={() => comboFileInputRef.current?.click()}
+                      style={{
+                        border: '2px dashed #93c5fd',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '24px 16px',
+                        textAlign: 'center',
+                        background: '#f8fafc',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = '#2563eb'; e.currentTarget.style.background = '#eff6ff' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.background = '#f8fafc' }}
+                    >
+                      <div style={{
+                        width: '44px', height: '44px', borderRadius: '50%',
+                        background: '#ffffff', border: '1.5px solid #dbeafe',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto 8px', boxShadow: '0 2px 4px rgba(37, 99, 235, 0.08)'
+                      }}>
+                        <UploadCloud size={22} color="#2563eb" />
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#1e3a8a' }}>
+                        Click to upload combo image or drag & drop here
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        Recommended: Square or 4:3 bundle photo showing all included products (PNG, JPG, WebP up to 5MB)
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {comboImages.map((img, idx) => (
+                          <div
+                            key={img.id || idx}
+                            style={{
+                              position: 'relative',
+                              width: '110px',
+                              height: '110px',
+                              borderRadius: 'var(--radius-sm)',
+                              border: `2.5px solid ${img.isPrimary ? '#2563eb' : 'var(--border)'}`,
+                              overflow: 'hidden',
+                              background: '#f3f4f6',
+                              boxShadow: img.isPrimary ? '0 0 0 2px rgba(37,99,235,0.2)' : 'none'
+                            }}
+                          >
+                            <img
+                              src={img.preview}
+                              alt="Combo preview"
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                            {img.isPrimary && (
+                              <span style={{
+                                position: 'absolute', top: 4, left: 4,
+                                background: '#2563eb', color: '#ffffff',
+                                fontSize: '9px', fontWeight: 800, padding: '2px 6px',
+                                borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.04em'
+                              }}>
+                                Primary
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleRemoveComboImage(idx) }}
+                              style={{
+                                position: 'absolute', top: 4, right: 4,
+                                background: 'rgba(0,0,0,0.7)', color: '#ffffff',
+                                border: 'none', borderRadius: '50%',
+                                width: '22px', height: '22px', display: 'flex',
+                                alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer'
+                              }}
+                              title="Remove image"
+                            >
+                              <X size={13} />
+                            </button>
+                            {!img.isPrimary && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetPrimaryComboImage(idx)}
+                                style={{
+                                  position: 'absolute', bottom: 4, left: 4, right: 4,
+                                  background: 'rgba(255,255,255,0.95)', color: '#111827',
+                                  border: '1px solid #d1d5db', borderRadius: '4px',
+                                  fontSize: '10px', fontWeight: 700, padding: '2px',
+                                  cursor: 'pointer', textAlign: 'center'
+                                }}
+                              >
+                                Set Primary
+                              </button>
+                            )}
+                          </div>
+                        ))}
+
+                        {/* Add More Button */}
+                        <button
+                          type="button"
+                          onClick={() => comboFileInputRef.current?.click()}
+                          style={{
+                            width: '110px',
+                            height: '110px',
+                            borderRadius: 'var(--radius-sm)',
+                            border: '2px dashed #93c5fd',
+                            background: '#f8fafc',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '4px',
+                            cursor: 'pointer',
+                            color: '#2563eb',
+                            transition: 'all 0.15s ease'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = '#2563eb'; e.currentTarget.style.background = '#eff6ff' }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.background = '#f8fafc' }}
+                        >
+                          <Plus size={22} />
+                          <span style={{ fontSize: '11px', fontWeight: 700 }}>Add More</span>
+                        </button>
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                        The primary image represents this combo on the website homepage, category lists, and product cards.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
               </div>
 
               {/* Modal Footer Actions */}
@@ -1033,9 +1392,9 @@ const AddCombo = () => {
                   disabled={savingCombo || selectedItems.length === 0 || maxPossibleCombos === 0}
                   id="save-combo-btn"
                 >
-                  {savingCombo ? (
+                  {(savingCombo || uploadingComboImage) ? (
                     <>
-                      <div className="btn-spinner" /> Saving & Logging History...
+                      <div className="btn-spinner" /> {uploadingComboImage ? 'Uploading Combo Images...' : 'Saving & Logging History...'}
                     </>
                   ) : (
                     <>

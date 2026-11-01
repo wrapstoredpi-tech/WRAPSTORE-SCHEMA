@@ -16,7 +16,7 @@ const STATUS_CONFIG = {
   CONFIRMED:        { label: 'Confirmed',          color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', icon: CheckCircle2 },
   PROCESSING:       { label: 'Processing',         color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', icon: Package },
   PACKED:           { label: 'Packed',             color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd', icon: Box },
-  READY_FOR_PICKUP: { label: 'Ready for Pickup',   color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', icon: ShoppingBag },
+  READY_FOR_PICKUP: { label: 'Packed',             color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd', icon: Box },
   SHIPPED:          { label: 'Shipped',            color: '#0284c7', bg: '#e0f2fe', border: '#7dd3fc', icon: Truck },
   DELIVERED:        { label: 'Delivered',          color: '#16a34a', bg: '#dcfce7', border: '#86efac', icon: CheckCircle2 },
   CANCELLED:        { label: 'Cancelled',          color: '#dc2626', bg: '#fef2f2', border: '#fecaca', icon: XCircle },
@@ -35,7 +35,7 @@ const STATUS_TRANSITIONS = {
   CONFIRMED:        ['PROCESSING', 'CANCELLED'],
   PROCESSING:       ['PACKED', 'CANCELLED'],
   PACKED:           ['SHIPPED', 'CANCELLED'],
-  READY_FOR_PICKUP: ['DELIVERED', 'CANCELLED'],
+  READY_FOR_PICKUP: ['SHIPPED', 'CANCELLED'],
   SHIPPED:          ['DELIVERED', 'CANCELLED'],
   DELIVERED:        ['RETURNED'],
   CANCELLED:        [],
@@ -65,6 +65,9 @@ const OrderCard = ({ order, onStatusChange, onOpenShipModal, onOpenCancelModal }
   const [updating, setUpdating] = useState(false)
   const nextStatuses = STATUS_TRANSITIONS[order.order_status] || []
   const cfg = STATUS_CONFIG[order.order_status]
+
+  const displayTrackingNumber = order.tracking_number || (order.notes?.match(/Tracking:\s*([^)\s·]+)/i)?.[1])
+  const displayCourierName = order.courier_name || (order.notes?.match(/Dispatched via\s+([^(]+)/i)?.[1]?.trim())
 
   const handleStatusClick = async (newStatus) => {
     if (newStatus === 'SHIPPED') {
@@ -109,13 +112,13 @@ const OrderCard = ({ order, onStatusChange, onOpenShipModal, onOpenCancelModal }
             </span>
           </div>
           <span style={{ fontWeight: 800, fontSize: 14 }}>{order.order_number}</span>
-          {order.tracking_number && (
+          {displayTrackingNumber && (
             <span style={{
               background: '#e0f2fe', border: '1px solid #7dd3fc',
               borderRadius: 6, padding: '2px 7px',
               fontSize: 10, fontWeight: 700, color: '#0369a1',
             }}>
-              Tracking: {order.tracking_number} ({order.courier_name || 'Courier'})
+              Tracking: {displayTrackingNumber} ({displayCourierName || 'Courier'})
             </span>
           )}
         </div>
@@ -304,11 +307,11 @@ const OrderCard = ({ order, onStatusChange, onOpenShipModal, onOpenCancelModal }
                 </code>
               </div>
             )}
-            {order.tracking_number && (
+            {displayTrackingNumber && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Truck size={13} color="#0284c7" />
-                <span>Courier: <strong>{order.courier_name || 'Courier'}</strong></span>
-                <span>AWB: <strong>{order.tracking_number}</strong></span>
+                <span>Courier: <strong>{displayCourierName || 'Courier'}</strong></span>
+                <span>AWB: <strong>{displayTrackingNumber}</strong></span>
               </div>
             )}
           </div>
@@ -403,7 +406,11 @@ const OnlineOrders = () => {
       .limit(100)
 
     if (statusFilter !== 'ALL') {
-      q = q.eq('order_status', statusFilter)
+      if (statusFilter === 'PACKED') {
+        q = q.in('order_status', ['PACKED', 'READY_FOR_PICKUP'])
+      } else {
+        q = q.eq('order_status', statusFilter)
+      }
     }
 
     const { data, error } = await q
@@ -425,7 +432,7 @@ const OnlineOrders = () => {
     const { count: pendingCount } = await supabase
       .from('online_orders')
       .select('*', { count: 'exact', head: true })
-      .in('order_status', ['PENDING', 'CONFIRMED', 'PROCESSING', 'PACKED'])
+      .in('order_status', ['PENDING', 'CONFIRMED', 'PROCESSING', 'PACKED', 'READY_FOR_PICKUP'])
 
     const { data: todayOrders } = await supabase
       .from('online_orders')
@@ -476,10 +483,10 @@ const OnlineOrders = () => {
     let payload = { order_status: newStatus }
     let { error } = await supabase.from('online_orders').update(payload).eq('id', orderId)
 
-    // Fallback if 'PACKED' is rejected by existing check constraint before SQL migration
-    if (error && newStatus === 'PACKED' && error.message.includes('check constraint')) {
-      const fallbackNote = (order.notes ? order.notes + ' ' : '') + '[Status: PACKED]'
-      const res = await supabase.from('online_orders').update({ order_status: 'PROCESSING', notes: fallbackNote }).eq('id', orderId)
+    // Fallback if 'PACKED' is rejected by existing check constraint before SQL migration:
+    // Update to 'READY_FOR_PICKUP' which is already permitted in the database check constraint
+    if (error && newStatus === 'PACKED' && (error.code === '23514' || error.message?.includes('check constraint'))) {
+      const res = await supabase.from('online_orders').update({ order_status: 'READY_FOR_PICKUP' }).eq('id', orderId)
       error = res.error
     }
 
@@ -504,6 +511,7 @@ const OnlineOrders = () => {
     try {
       const trackingText = trackingNumberInput.trim()
       const courierText = courierNameInput.trim() || 'Courier'
+      const noteWithTracking = `Dispatched via ${courierText} (Tracking: ${trackingText})`
 
       // Try updating with tracking_number and courier_name
       let { error } = await supabase
@@ -512,12 +520,12 @@ const OnlineOrders = () => {
           order_status: 'SHIPPED',
           tracking_number: trackingText,
           courier_name: courierText,
+          notes: (shipModalOrder.notes ? shipModalOrder.notes + ' · ' : '') + noteWithTracking,
         })
         .eq('id', shipModalOrder.id)
 
       // Fallback if tracking_number column not yet migrated
-      if (error && error.message.includes('column')) {
-        const noteWithTracking = `Dispatched via ${courierText} (Tracking: ${trackingText})`
+      if (error && (error.message?.includes('column') || error.code === '42703')) {
         const res = await supabase
           .from('online_orders')
           .update({
