@@ -1,7 +1,7 @@
 // ============================================================
 // WRAPSTORE FINAL UNIFIED DASHBOARD
 // Multi-stage control center: Today's sales, inventory health,
-// recent invoices with WhatsApp status, top products, and quick actions
+// recent invoices, online orders stream, top products, and channels
 // ============================================================
 
 import React, { useEffect, useState, useMemo } from 'react'
@@ -10,11 +10,11 @@ import {
   Package, Warehouse, TrendingUp, AlertTriangle,
   XCircle, ArrowUpRight, Clock, CheckCircle2, RefreshCw,
   ShoppingBag, CreditCard, MessageCircle, Sparkles,
-  ChevronRight, BarChart2
+  ChevronRight, BarChart2, Globe
 } from 'lucide-react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, AreaChart, Area, Cell
+  CartesianGrid, Tooltip, AreaChart, Area, Legend, Cell
 } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -56,6 +56,7 @@ const Dashboard = () => {
   const [products, setProducts] = useState([])
   const [invoices, setInvoices] = useState([])
   const [invoiceItems, setInvoiceItems] = useState([])
+  const [onlineOrders, setOnlineOrders] = useState([])
 
   const fetchData = async () => {
     setLoading(true)
@@ -64,10 +65,12 @@ const Dashboard = () => {
         { data: prodData },
         { data: invData },
         { data: itemData },
+        { data: onlData },
       ] = await Promise.all([
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('invoices').select('*').eq('payment_status', 'PAID').order('created_at', { ascending: false }),
         supabase.from('invoice_items').select('*').order('created_at', { ascending: false }),
+        supabase.from('online_orders').select('*, online_order_items(*)').eq('payment_status', 'PAID').not('order_status', 'eq', 'CANCELLED').order('created_at', { ascending: false }),
       ])
 
       const localProdsStr = localStorage.getItem('wrapstore_custom_products_v1')
@@ -85,6 +88,7 @@ const Dashboard = () => {
       setProducts(mergedProds)
       setInvoices(invData || [])
       setInvoiceItems(itemData || [])
+      setOnlineOrders(onlData || [])
     } catch (err) {
       console.error('Dashboard fetch error:', err)
     } finally {
@@ -100,7 +104,12 @@ const Dashboard = () => {
   const metrics = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10)
     const todayInvoices = invoices.filter(i => i.created_at?.startsWith(todayStr))
-    const todaySales = todayInvoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
+    const todayOnline = (onlineOrders || []).filter(o => o.created_at?.startsWith(todayStr))
+
+    const todayPosSales = todayInvoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
+    const todayOnlineSales = todayOnline.reduce((s, o) => s + Number(o.grand_total || 0), 0)
+    const todayCombinedSales = todayPosSales + todayOnlineSales
+    const todayOrdersCount = todayInvoices.length + todayOnline.length
 
     const approved = products.filter(p => p.approval_status === 'APPROVED' || !p.approval_status)
     const pendingApproval = products.filter(p => p.approval_status === 'PENDING_APPROVAL')
@@ -111,8 +120,12 @@ const Dashboard = () => {
     const outOfStock = activeCatalog.filter(p => Number(p.current_stock || 0) === 0)
 
     return {
-      todaySales,
+      todayCombinedSales,
+      todayPosSales,
+      todayOnlineSales,
       todayInvoicesCount: todayInvoices.length,
+      todayOnlineCount: todayOnline.length,
+      todayOrdersCount,
       totalProducts: products.length,
       pendingApprovalCount: pendingApproval.length,
       totalStock,
@@ -120,20 +133,32 @@ const Dashboard = () => {
       lowStockCount: lowStock.length,
       outOfStockCount: outOfStock.length,
     }
-  }, [products, invoices])
+  }, [products, invoices, onlineOrders])
 
-  // Sales Overview Chart: Group invoices by date (last 7 recorded days)
+  // Sales Overview Chart: Both POS invoices and Online Orders as separate lines + combined total
   const salesOverviewData = useMemo(() => {
     const map = {}
-    invoices.slice(0, 50).forEach(inv => {
+
+    // Map POS invoices
+    invoices.slice(0, 60).forEach(inv => {
       const d = new Date(inv.created_at)
       const key = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
-      if (!map[key]) map[key] = { date: key, sales: 0, invoices: 0 }
-      map[key].sales += Number(inv.grand_total || 0)
-      map[key].invoices += 1
+      if (!map[key]) map[key] = { date: key, posSales: 0, onlineSales: 0, totalSales: 0 }
+      map[key].posSales += Number(inv.grand_total || 0)
+      map[key].totalSales += Number(inv.grand_total || 0)
     })
+
+    // Map Online orders
+    onlineOrders.slice(0, 60).forEach(ord => {
+      const d = new Date(ord.created_at)
+      const key = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+      if (!map[key]) map[key] = { date: key, posSales: 0, onlineSales: 0, totalSales: 0 }
+      map[key].onlineSales += Number(ord.grand_total || 0)
+      map[key].totalSales += Number(ord.grand_total || 0)
+    })
+
     return Object.values(map).reverse().slice(-7)
-  }, [invoices])
+  }, [invoices, onlineOrders])
 
   // Inventory Overview: Breakdown by product type
   const typeBreakdown = useMemo(() => {
@@ -146,9 +171,11 @@ const Dashboard = () => {
     }))
   }, [products])
 
-  // Top Selling Products Leaderboard
+  // Top Selling Products Leaderboard (both POS items and online items)
   const topSellingProducts = useMemo(() => {
     const map = {}
+
+    // POS invoice items
     invoiceItems.forEach(it => {
       const key = it.product_id_code || it.product_name
       if (!map[key]) {
@@ -163,30 +190,47 @@ const Dashboard = () => {
       map[key].units += Number(it.quantity || 0)
       map[key].revenue += Number(it.line_total || 0)
     })
-    return Object.values(map).sort((a, b) => b.units - a.units).slice(0, 5)
-  }, [invoiceItems])
 
-  // Channel Revenue Breakdown (uses the channel column added in migration_channel_tracking.sql)
-  // Falls back gracefully — if the column doesn't exist yet, all invoices land in 'offline'
-  const channelBreakdown = useMemo(() => {
-    const CHANNEL_LABELS = {
-      offline:   { label: 'Offline (POS)', color: '#111827', bg: '#f3f4f6' },
-      website:   { label: 'Website',       color: '#2563eb', bg: '#eff6ff' },
-      amazon:    { label: 'Amazon',         color: '#f59e0b', bg: '#fffbeb' },
-      flipkart:  { label: 'Flipkart',       color: '#3b82f6', bg: '#eff6ff' },
-      instagram: { label: 'Instagram',      color: '#ec4899', bg: '#fdf2f8' },
-      whatsapp:  { label: 'WhatsApp',       color: '#16a34a', bg: '#dcfce7' },
-      other:     { label: 'Other',          color: '#6b7280', bg: '#f9fafb' },
-    }
-    const map = {}
-    invoices.forEach(inv => {
-      const ch = inv.channel || 'offline'  // fallback if column not yet migrated
-      if (!map[ch]) map[ch] = { channel: ch, revenue: 0, count: 0, ...CHANNEL_LABELS[ch] }
-      map[ch].revenue += Number(inv.grand_total || 0)
-      map[ch].count += 1
+    // Online order items
+    onlineOrders.forEach(ord => {
+      (ord.online_order_items || []).forEach(it => {
+        const key = it.product_id_code || it.product_name
+        if (!map[key]) {
+          map[key] = {
+            code: it.product_id_code || 'ONL-SKU',
+            name: it.product_name,
+            model: it.mobile_model || '—',
+            units: 0,
+            revenue: 0,
+          }
+        }
+        map[key].units += Number(it.quantity || 0)
+        map[key].revenue += Number(it.line_total || 0)
+      })
     })
-    return Object.values(map).sort((a, b) => b.revenue - a.revenue)
-  }, [invoices])
+
+    return Object.values(map).sort((a, b) => b.units - a.units).slice(0, 5)
+  }, [invoiceItems, onlineOrders])
+
+  // Channel Revenue Breakdown (POS Invoices + Online Website Orders)
+  const channelBreakdown = useMemo(() => {
+    const map = {
+      offline: { channel: 'offline', label: 'POS Counter', color: '#111827', bg: '#f3f4f6', revenue: 0, count: 0 },
+      website: { channel: 'website', label: 'Online Website', color: '#2563eb', bg: '#eff6ff', revenue: 0, count: 0 },
+    }
+
+    invoices.forEach(inv => {
+      map.offline.revenue += Number(inv.grand_total || 0)
+      map.offline.count += 1
+    })
+
+    onlineOrders.forEach(ord => {
+      map.website.revenue += Number(ord.grand_total || 0)
+      map.website.count += 1
+    })
+
+    return Object.values(map).filter(ch => ch.count > 0 || ch.revenue > 0)
+  }, [invoices, onlineOrders])
 
   // Recent Invoices (Latest 6)
   const recentInvoices = useMemo(() => invoices.slice(0, 6), [invoices])
@@ -204,7 +248,7 @@ const Dashboard = () => {
       {/* Action Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Store Operations & Physical POS Summary</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Store Operations, POS & Live Website Channels</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-secondary btn-sm" onClick={fetchData}>
@@ -213,28 +257,28 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* 7 Required Metrics Cards */}
+      {/* Required Metrics Cards */}
       <div className="stat-grid" style={{ marginBottom: 20 }}>
-        {/* 1. Today's Sales */}
+        {/* 1. Today's Combined Sales */}
         <StatCard
           icon={TrendingUp}
-          label="Today's Sales"
-          value={INR(metrics.todaySales)}
-          sub={`${metrics.todayInvoicesCount} sales completed today`}
+          label="Today's Total Sales"
+          value={INR(metrics.todayCombinedSales)}
+          sub={`POS: ${INR(metrics.todayPosSales)} · Online: ${INR(metrics.todayOnlineSales)}`}
           iconBg="#ecfdf5"
           iconColor="#10b981"
           onClick={() => navigate('/sales')}
         />
 
-        {/* 2. Invoices Today */}
+        {/* 2. Orders Today (Combined) */}
         <StatCard
           icon={ShoppingBag}
-          label="Invoices Today"
-          value={metrics.todayInvoicesCount}
-          sub="Physical counter checkouts"
+          label="Orders Today"
+          value={metrics.todayOrdersCount}
+          sub={`${metrics.todayInvoicesCount} POS + ${metrics.todayOnlineCount} Website`}
           iconBg="#eff6ff"
           iconColor="#3b82f6"
-          onClick={() => navigate('/invoices')}
+          onClick={() => navigate('/online-orders')}
         />
 
         {/* 3. Total Products */}
@@ -242,7 +286,7 @@ const Dashboard = () => {
           icon={Package}
           label="Total Products"
           value={metrics.totalProducts}
-          sub="Approved items catalog"
+          sub="Catalog inventory items"
           iconBg="#f3f4f6"
           iconColor="#111827"
           onClick={() => navigate('/products')}
@@ -277,25 +321,42 @@ const Dashboard = () => {
       {channelBreakdown.length > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header">
-            <span className="card-title">Revenue by Channel</span>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>All-time breakdown — totals unchanged</span>
+            <span className="card-title">Revenue by Channel (POS vs Online Website)</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Separate streams with combined oversight</span>
           </div>
           <div className="card-body">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
               {channelBreakdown.map(ch => (
                 <div key={ch.channel} style={{
                   background: ch.bg || '#f9fafb',
                   borderRadius: 'var(--radius)',
-                  padding: '12px 14px',
-                  border: `1px solid ${ch.color}22`,
+                  padding: '14px 16px',
+                  border: `1.5px solid ${ch.color}22`,
                 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: ch.color, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-                    {ch.label || ch.channel}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: ch.color, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {ch.channel === 'website' ? <Globe size={13} /> : <ShoppingBag size={13} />}
+                    {ch.label}
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 800 }}>{INR(ch.revenue)}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ch.count} invoice{ch.count !== 1 ? 's' : ''}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800 }}>{INR(ch.revenue)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ch.count} order{ch.count !== 1 ? 's' : ''}</div>
                 </div>
               ))}
+              <div style={{
+                background: '#f0fdf4',
+                borderRadius: 'var(--radius)',
+                padding: '14px 16px',
+                border: '1.5px solid #bbf7d0',
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                  Combined Total
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#15803d' }}>
+                  {INR(channelBreakdown.reduce((sum, ch) => sum + ch.revenue, 0))}
+                </div>
+                <div style={{ fontSize: 11, color: '#16a34a', marginTop: 2 }}>
+                  {channelBreakdown.reduce((sum, ch) => sum + ch.count, 0)} total orders
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -303,12 +364,12 @@ const Dashboard = () => {
 
       {/* Sales Overview & Inventory Overview Charts */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1.1fr', gap: 20, marginBottom: 20 }}>
-        {/* Sales Overview Chart */}
+        {/* Sales Overview Chart: Both Lines + Combined */}
         <div className="card">
           <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <span className="card-title">Sales Overview</span>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>Recent revenue trend</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>POS Invoices & Online Orders</span>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('/sales')} style={{ fontSize: 12 }}>
               Analytics <ChevronRight size={12} />
@@ -317,15 +378,19 @@ const Dashboard = () => {
           <div className="card-body">
             {salesOverviewData.length === 0 ? (
               <div className="empty-state" style={{ padding: '30px 0' }}>
-                <p style={{ margin: 0, fontSize: 13 }}>No sales transactions yet</p>
+                <p style={{ margin: 0, fontSize: 13 }}>No sales transactions recorded yet</p>
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={210}>
+              <ResponsiveContainer width="100%" height={230}>
                 <AreaChart data={salesOverviewData} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
                   <defs>
-                    <linearGradient id="dashGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#111827" stopOpacity={0.25} />
+                    <linearGradient id="posGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#111827" stopOpacity={0.2} />
                       <stop offset="95%" stopColor="#111827" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="onlGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
@@ -333,9 +398,15 @@ const Dashboard = () => {
                   <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={INR_SHORT} />
                   <Tooltip
                     contentStyle={{ border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12 }}
-                    formatter={(val) => [INR(val), 'Revenue']}
+                    formatter={(val, name) => [INR(val), name === 'posSales' ? 'POS Sales' : name === 'onlineSales' ? 'Online Orders' : 'Combined Total']}
                   />
-                  <Area type="monotone" dataKey="sales" stroke="#111827" strokeWidth={2.5} fill="url(#dashGrad)" />
+                  <Legend
+                    formatter={(val) => val === 'posSales' ? 'POS Invoices' : val === 'onlineSales' ? 'Online Orders' : 'Combined Total'}
+                    wrapperStyle={{ fontSize: 11, paddingTop: 6 }}
+                  />
+                  <Area type="monotone" dataKey="posSales" stroke="#111827" strokeWidth={2} fill="url(#posGrad)" />
+                  <Area type="monotone" dataKey="onlineSales" stroke="#2563eb" strokeWidth={2} fill="url(#onlGrad)" />
+                  <Area type="monotone" dataKey="totalSales" stroke="#10b981" strokeWidth={2.5} strokeDasharray="4 4" fill="none" />
                 </AreaChart>
               </ResponsiveContainer>
             )}
@@ -383,12 +454,12 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Top Selling Products & Recent Invoices with WhatsApp Status */}
+      {/* Top Selling Products & Recent Invoices */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: 20 }}>
         {/* Top Selling Products */}
         <div className="card" style={{ padding: 0 }}>
           <div className="card-header" style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span className="card-title">Top Selling Products</span>
+            <span className="card-title">Top Selling Products (POS & Online)</span>
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('/sales')} style={{ fontSize: 12 }}>
               All <ChevronRight size={12} />
             </button>
@@ -426,10 +497,10 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Recent Invoices Table with WhatsApp Status */}
+        {/* Recent Invoices Table */}
         <div className="card" style={{ padding: 0 }}>
           <div className="card-header" style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span className="card-title">Recent Invoices</span>
+            <span className="card-title">Recent Invoices (POS)</span>
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('/invoices')} style={{ fontSize: 12 }}>
               View all <ChevronRight size={12} />
             </button>
@@ -437,7 +508,7 @@ const Dashboard = () => {
           <div className="table-container" style={{ border: 'none' }}>
             {recentInvoices.length === 0 ? (
               <div className="empty-state" style={{ padding: '30px 0' }}>
-                <p style={{ margin: 0, fontSize: 13 }}>No invoices generated yet</p>
+                <p style={{ margin: 0, fontSize: 13 }}>No POS invoices generated yet</p>
               </div>
             ) : (
               <table>

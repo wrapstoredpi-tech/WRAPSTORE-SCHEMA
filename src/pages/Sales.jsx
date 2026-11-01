@@ -1,13 +1,13 @@
 // ============================================================
 // WRAPSTORE SALES ANALYTICS
-// Real-time sales insights based on completed invoices
+// Real-time sales insights based on completed invoices and confirmed online orders
 // ============================================================
 
 import React, { useState, useEffect, useMemo } from 'react'
 import {
   TrendingUp, Calendar, CreditCard, ShoppingBag, DollarSign,
   Package, ArrowUpRight, BarChart2, PieChart as PieIcon, RefreshCw,
-  Smartphone, ShieldCheck
+  Smartphone, ShieldCheck, Globe
 } from 'lucide-react'
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
@@ -22,12 +22,15 @@ const PRODUCT_TYPES = [
   { key: 'iphone_case', label: 'iPhone Cases', color: '#111827' },
   { key: 'samsung_case', label: 'Samsung Premium Cases', color: '#3b82f6' },
   { key: 'mobile_sticker', label: 'Mobile Stickers', color: '#10b981' },
+  { key: 'combo', label: 'Value Combos', color: '#8b5cf6' },
 ]
 
 const PAYMENT_COLORS = {
   Cash: '#10b981',
   UPI: '#6366f1',
   Card: '#f59e0b',
+  Online: '#0284c7',
+  Razorpay: '#0284c7',
   Other: '#6b7280',
 }
 
@@ -37,6 +40,8 @@ const Sales = () => {
   const [customEnd, setCustomEnd] = useState('')
   const [invoices, setInvoices] = useState([])
   const [invoiceItems, setInvoiceItems] = useState([])
+  const [onlineOrders, setOnlineOrders] = useState([])
+  const [onlineOrderItems, setOnlineOrderItems] = useState([])
   const [loading, setLoading] = useState(true)
 
   // Calculate range bounds
@@ -76,18 +81,38 @@ const Sales = () => {
       const { start, end } = getBounds()
 
       // Fetch invoices in date range
-      const { data: invData } = await supabase
-        .from('invoices')
-        .select('*')
-        .eq('payment_status', 'PAID')
-        .gte('created_at', start)
-        .lte('created_at', end)
-        .order('created_at', { ascending: true })
+      const [
+        { data: invData },
+        { data: onlineData },
+      ] = await Promise.all([
+        supabase
+          .from('invoices')
+          .select('*')
+          .eq('payment_status', 'PAID')
+          .gte('created_at', start)
+          .lte('created_at', end)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('online_orders')
+          .select('*')
+          .neq('order_status', 'CANCELLED')
+          .gte('created_at', start)
+          .lte('created_at', end)
+          .order('created_at', { ascending: true }),
+      ])
 
       const invList = invData || []
-      setInvoices(invList)
+      const onlineList = (onlineData || []).filter(o =>
+        o.payment_status === 'PAID' ||
+        o.payment_status === 'COMPLETED' ||
+        o.payment_status === 'captured' ||
+        ['CONFIRMED', 'PROCESSING', 'PACKED', 'SHIPPED', 'DELIVERED'].includes(o.order_status)
+      )
 
-      // Fetch invoice items for these invoices
+      setInvoices(invList)
+      setOnlineOrders(onlineList)
+
+      // Fetch items for invoices
       if (invList.length > 0) {
         const invIds = invList.map(i => i.id)
         const { data: itemsData } = await supabase
@@ -97,6 +122,18 @@ const Sales = () => {
         setInvoiceItems(itemsData || [])
       } else {
         setInvoiceItems([])
+      }
+
+      // Fetch items for online orders
+      if (onlineList.length > 0) {
+        const orderIds = onlineList.map(o => o.id)
+        const { data: oItemsData } = await supabase
+          .from('online_order_items')
+          .select('*')
+          .in('order_id', orderIds)
+        setOnlineOrderItems(oItemsData || [])
+      } else {
+        setOnlineOrderItems([])
       }
     } catch (err) {
       console.error('Error fetching sales analytics:', err)
@@ -109,56 +146,98 @@ const Sales = () => {
     fetchData()
   }, [dateRange, customStart, customEnd])
 
-  // Aggregate Metrics
+  // Aggregate Metrics (Omnichannel)
   const summary = useMemo(() => {
-    const totalSales = invoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
-    const totalInvoices = invoices.length
+    const posSales = invoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
+    const posCount = invoices.length
+    const posGst = invoices.reduce((s, i) => s + Number(i.gst_amount || 0), 0)
+    const posDiscounts = invoices.reduce((s, i) => s + Number(i.discount_amount || 0), 0)
+
+    const onlineSales = onlineOrders.reduce((s, o) => s + Number(o.total_amount || 0), 0)
+    const onlineCount = onlineOrders.length
+    const onlineGst = onlineOrders.reduce((s, o) => s + Number(o.gst_amount || 0), 0)
+    const onlineDiscounts = onlineOrders.reduce((s, o) => s + Number(o.discount_amount || 0), 0)
+
+    const totalSales = posSales + onlineSales
+    const totalInvoices = posCount + onlineCount
     const avgOrderValue = totalInvoices > 0 ? totalSales / totalInvoices : 0
-    const totalUnits = invoiceItems.reduce((s, it) => s + Number(it.quantity || 0), 0)
-    const totalGst = invoices.reduce((s, i) => s + Number(i.gst_amount || 0), 0)
-    const totalDiscounts = invoices.reduce((s, i) => s + Number(i.discount_amount || 0), 0)
 
-    return { totalSales, totalInvoices, avgOrderValue, totalUnits, totalGst, totalDiscounts }
-  }, [invoices, invoiceItems])
+    const posUnits = invoiceItems.reduce((s, it) => s + Number(it.quantity || 0), 0)
+    const onlineUnits = onlineOrderItems.reduce((s, it) => s + Number(it.quantity || 0), 0)
+    const totalUnits = posUnits + onlineUnits
 
-  // Daily / Periodic Trend Data
+    const totalGst = posGst + onlineGst
+    const totalDiscounts = posDiscounts + onlineDiscounts
+
+    return {
+      posSales, posCount,
+      onlineSales, onlineCount,
+      totalSales, totalInvoices, avgOrderValue, totalUnits, totalGst, totalDiscounts
+    }
+  }, [invoices, invoiceItems, onlineOrders, onlineOrderItems])
+
+  // Daily / Periodic Trend Data (Omnichannel)
   const trendData = useMemo(() => {
     const map = {}
+    // Invoices
     invoices.forEach(inv => {
       const d = new Date(inv.created_at)
       const key = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
-      if (!map[key]) map[key] = { date: key, sales: 0, count: 0 }
-      map[key].sales += Number(inv.grand_total || 0)
+      if (!map[key]) map[key] = { date: key, sales: 0, posSales: 0, onlineSales: 0, count: 0 }
+      const amt = Number(inv.grand_total || 0)
+      map[key].sales += amt
+      map[key].posSales += amt
+      map[key].count += 1
+    })
+    // Online orders
+    onlineOrders.forEach(ord => {
+      const d = new Date(ord.created_at)
+      const key = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+      if (!map[key]) map[key] = { date: key, sales: 0, posSales: 0, onlineSales: 0, count: 0 }
+      const amt = Number(ord.total_amount || 0)
+      map[key].sales += amt
+      map[key].onlineSales += amt
       map[key].count += 1
     })
     return Object.values(map)
-  }, [invoices])
+  }, [invoices, onlineOrders])
 
-  // Sales by Product Type
+  // Sales by Product Type (Omnichannel)
   const typeData = useMemo(() => {
     const map = {
       iphone_case: { name: 'iPhone Cases', sales: 0, units: 0, color: '#111827' },
       samsung_case: { name: 'Samsung Premium Cases', sales: 0, units: 0, color: '#3b82f6' },
       mobile_sticker: { name: 'Mobile Stickers', sales: 0, units: 0, color: '#10b981' },
+      combo: { name: 'Combos & Packs', sales: 0, units: 0, color: '#8b5cf6' },
     }
 
+    // POS Items
     invoiceItems.forEach(item => {
       const t = item.product_type || 'iphone_case'
-      if (map[t]) {
-        map[t].sales += Number(item.line_total || 0)
-        map[t].units += Number(item.quantity || 0)
-      }
+      const key = map[t] ? t : 'iphone_case'
+      map[key].sales += Number(item.line_total || 0)
+      map[key].units += Number(item.quantity || 0)
+    })
+
+    // Online Items
+    onlineOrderItems.forEach(item => {
+      let t = item.product_type || 'iphone_case'
+      if (t === 'case') t = 'iphone_case'
+      const key = map[t] ? t : 'iphone_case'
+      map[key].sales += Number(item.line_total || 0)
+      map[key].units += Number(item.quantity || 0)
     })
 
     return Object.values(map)
-  }, [invoiceItems])
+  }, [invoiceItems, onlineOrderItems])
 
-  // Payment Breakdown
+  // Payment Breakdown (Omnichannel)
   const paymentData = useMemo(() => {
     const map = {
       Cash: { name: 'Cash', value: 0, count: 0, color: PAYMENT_COLORS.Cash },
       UPI: { name: 'UPI', value: 0, count: 0, color: PAYMENT_COLORS.UPI },
       Card: { name: 'Card', value: 0, count: 0, color: PAYMENT_COLORS.Card },
+      'Online (Razorpay)': { name: 'Online (Razorpay)', value: 0, count: 0, color: PAYMENT_COLORS.Razorpay },
       Other: { name: 'Other', value: 0, count: 0, color: PAYMENT_COLORS.Other },
     }
 
@@ -167,13 +246,21 @@ const Sales = () => {
       if (map[pm]) {
         map[pm].value += Number(inv.grand_total || 0)
         map[pm].count += 1
+      } else {
+        map['Other'].value += Number(inv.grand_total || 0)
+        map['Other'].count += 1
       }
     })
 
-    return Object.values(map).filter(p => p.count > 0 || p.value > 0)
-  }, [invoices])
+    onlineOrders.forEach(ord => {
+      map['Online (Razorpay)'].value += Number(ord.total_amount || 0)
+      map['Online (Razorpay)'].count += 1
+    })
 
-  // Top Selling Products Leaderboard
+    return Object.values(map).filter(p => p.count > 0 || p.value > 0)
+  }, [invoices, onlineOrders])
+
+  // Top Selling Products Leaderboard (Omnichannel)
   const topProducts = useMemo(() => {
     const map = {}
     invoiceItems.forEach(it => {
@@ -192,8 +279,24 @@ const Sales = () => {
       map[key].revenue += Number(it.line_total || 0)
     })
 
+    onlineOrderItems.forEach(it => {
+      const key = it.product_name || `prod-${it.product_id}`
+      if (!map[key]) {
+        map[key] = {
+          code: 'WEB',
+          name: it.product_name,
+          type: it.product_type,
+          model: it.mobile_model || '—',
+          units: 0,
+          revenue: 0,
+        }
+      }
+      map[key].units += Number(it.quantity || 0)
+      map[key].revenue += Number(it.line_total || 0)
+    })
+
     return Object.values(map).sort((a, b) => b.revenue - a.revenue)
-  }, [invoiceItems])
+  }, [invoiceItems, onlineOrderItems])
 
   return (
     <div>
@@ -201,7 +304,7 @@ const Sales = () => {
       <div className="section-header" style={{ marginBottom: 16 }}>
         <div>
           <div className="section-title">Sales Analytics</div>
-          <div className="section-subtitle">Real-time revenue, order trends, and product performance</div>
+          <div className="section-subtitle">Real-time revenue, order trends, and product performance (POS & Online)</div>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={fetchData}>
           <RefreshCw size={13} /> Refresh
@@ -263,9 +366,11 @@ const Sales = () => {
                 <TrendingUp size={20} color="#10b981" strokeWidth={2.5} />
               </div>
               <div className="stat-content">
-                <div className="stat-label">Total Sales</div>
+                <div className="stat-label">Total Sales (Omnichannel)</div>
                 <div className="stat-value">{INR(summary.totalSales)}</div>
-                <div className="stat-sub">{summary.totalInvoices} completed invoices</div>
+                <div className="stat-sub">
+                  POS: {INR(summary.posSales)} ({summary.posCount}) · Online: {INR(summary.onlineSales)} ({summary.onlineCount})
+                </div>
               </div>
             </div>
 
@@ -274,7 +379,7 @@ const Sales = () => {
                 <ShoppingBag size={20} color="#3b82f6" strokeWidth={2.5} />
               </div>
               <div className="stat-content">
-                <div className="stat-label">Invoices Count</div>
+                <div className="stat-label">Total Transactions</div>
                 <div className="stat-value">{summary.totalInvoices}</div>
                 <div className="stat-sub">Avg Order: {INR(summary.avgOrderValue)}</div>
               </div>
@@ -287,7 +392,7 @@ const Sales = () => {
               <div className="stat-content">
                 <div className="stat-label">Units Sold</div>
                 <div className="stat-value">{summary.totalUnits.toLocaleString()}</div>
-                <div className="stat-sub">Across all 3 product types</div>
+                <div className="stat-sub">Combined store & online orders</div>
               </div>
             </div>
 
@@ -309,7 +414,7 @@ const Sales = () => {
             <div className="card">
               <div className="card-header">
                 <span className="card-title">Sales Trend</span>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Revenue over time</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Revenue over time (POS & Online combined)</span>
               </div>
               <div className="card-body">
                 {trendData.length === 0 ? (
@@ -331,7 +436,7 @@ const Sales = () => {
                       <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={INR_SHORT} />
                       <Tooltip
                         contentStyle={{ border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12 }}
-                        formatter={(val) => [INR(val), 'Sales']}
+                        formatter={(val) => [INR(val), 'Total Sales']}
                       />
                       <Area type="monotone" dataKey="sales" stroke="#111827" strokeWidth={2.5} fillOpacity={1} fill="url(#salesGrad)" />
                     </AreaChart>
@@ -344,7 +449,7 @@ const Sales = () => {
             <div className="card">
               <div className="card-header">
                 <span className="card-title">Sales by Product Type</span>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Store Scope</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Omnichannel Scope</span>
               </div>
               <div className="card-body">
                 {typeData.every(t => t.sales === 0) ? (
@@ -399,7 +504,7 @@ const Sales = () => {
             <div className="card">
               <div className="card-header">
                 <span className="card-title">Payment Breakdown</span>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Cash, UPI, Card</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Cash, UPI, Card & Online</span>
               </div>
               <div className="card-body">
                 {paymentData.length === 0 ? (
@@ -433,7 +538,7 @@ const Sales = () => {
             <div className="card" style={{ padding: 0 }}>
               <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
                 <span className="card-title">Top Selling Products</span>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ranked by revenue</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ranked by revenue (POS + Online)</span>
               </div>
               <div className="table-container" style={{ border: 'none' }}>
                 {topProducts.length === 0 ? (

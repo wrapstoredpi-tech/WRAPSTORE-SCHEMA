@@ -1,13 +1,14 @@
 // ============================================================
 // WRAPSTORE REPORTS CENTER
 // Comprehensive Inventory, Sales, and Customer reports with CSV export & Print
+// Omnichannel-enabled: displays both POS Invoices & Online Orders
 // ============================================================
 
 import React, { useState, useEffect, useMemo } from 'react'
 import {
   FileText, Warehouse, TrendingUp, Users, Download,
   Printer, Calendar, Search, RefreshCw, CheckCircle2,
-  AlertTriangle, XCircle, ArrowUpRight
+  AlertTriangle, XCircle, ArrowUpRight, Globe, ShoppingBag
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -21,6 +22,8 @@ const Reports = () => {
   const [products, setProducts] = useState([])
   const [invoices, setInvoices] = useState([])
   const [invoiceItems, setInvoiceItems] = useState([])
+  const [onlineOrders, setOnlineOrders] = useState([])
+  const [onlineOrderItems, setOnlineOrderItems] = useState([])
   const [customers, setCustomers] = useState([])
   const [salesPeriod, setSalesPeriod] = useState('all') // 'today', 'month', 'all'
 
@@ -32,17 +35,23 @@ const Reports = () => {
         { data: invData },
         { data: itemData },
         { data: custData },
+        { data: onlineOrderData },
+        { data: onlineItemData },
       ] = await Promise.all([
         supabase.from('products').select('*').eq('approval_status', 'APPROVED').eq('is_active', true).order('name'),
         supabase.from('invoices').select('*').eq('payment_status', 'PAID').order('created_at', { ascending: false }),
         supabase.from('invoice_items').select('*').order('created_at', { ascending: false }),
         supabase.from('customers').select('*').order('total_spent', { ascending: false }),
+        supabase.from('online_orders').select('*').order('created_at', { ascending: false }),
+        supabase.from('online_order_items').select('*').order('created_at', { ascending: false }),
       ])
 
       setProducts(prodData || [])
       setInvoices(invData || [])
       setInvoiceItems(itemData || [])
       setCustomers(custData || [])
+      setOnlineOrders(onlineOrderData || [])
+      setOnlineOrderItems(onlineItemData || [])
     } catch (err) {
       console.error('Error fetching reports data:', err)
     } finally {
@@ -106,7 +115,7 @@ const Reports = () => {
   }
 
   // ====================================================
-  // 2. SALES REPORT CALCULATIONS
+  // 2. SALES REPORT CALCULATIONS (OMNICHANNEL)
   // ====================================================
   const filteredInvoices = useMemo(() => {
     if (salesPeriod === 'today') {
@@ -120,52 +129,134 @@ const Reports = () => {
     return invoices
   }, [invoices, salesPeriod])
 
+  const filteredOnlineOrders = useMemo(() => {
+    const validOrders = onlineOrders.filter(o => 
+      o.order_status !== 'CANCELLED' &&
+      (
+        o.payment_status === 'PAID' ||
+        o.payment_status === 'COMPLETED' ||
+        o.payment_status === 'captured' ||
+        ['CONFIRMED', 'PROCESSING', 'PACKED', 'SHIPPED', 'DELIVERED'].includes(o.order_status)
+      )
+    )
+    if (salesPeriod === 'today') {
+      const today = new Date().toISOString().slice(0, 10)
+      return validOrders.filter(o => o.created_at?.startsWith(today))
+    }
+    if (salesPeriod === 'month') {
+      const currentMonth = new Date().toISOString().slice(0, 7)
+      return validOrders.filter(o => o.created_at?.startsWith(currentMonth))
+    }
+    return validOrders
+  }, [onlineOrders, salesPeriod])
+
   const salesSummary = useMemo(() => {
-    const totalSales = filteredInvoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
-    const totalTaxable = filteredInvoices.reduce((s, i) => s + Number(i.taxable_amount || 0), 0)
-    const totalGst = filteredInvoices.reduce((s, i) => s + Number(i.gst_amount || 0), 0)
-    const totalDiscount = filteredInvoices.reduce((s, i) => s + Number(i.discount_amount || 0), 0)
-    const count = filteredInvoices.length
+    // POS Invoices
+    const posSales = filteredInvoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
+    const posTaxable = filteredInvoices.reduce((s, i) => s + Number(i.taxable_amount || 0), 0)
+    const posGst = filteredInvoices.reduce((s, i) => s + Number(i.gst_amount || 0), 0)
+    const posDiscount = filteredInvoices.reduce((s, i) => s + Number(i.discount_amount || 0), 0)
+    const posCount = filteredInvoices.length
 
-    return { totalSales, totalTaxable, totalGst, totalDiscount, count }
-  }, [filteredInvoices])
+    // Online Website Orders
+    const onlineSales = filteredOnlineOrders.reduce((s, o) => s + Number(o.total_amount || 0), 0)
+    const onlineTaxable = filteredOnlineOrders.reduce((s, o) => s + Number(o.subtotal_amount || o.subtotal || o.total_amount || 0), 0)
+    const onlineGst = filteredOnlineOrders.reduce((s, o) => s + Number(o.gst_amount || 0), 0)
+    const onlineDiscount = filteredOnlineOrders.reduce((s, o) => s + Number(o.discount_amount || 0), 0)
+    const onlineCount = filteredOnlineOrders.length
 
-  // Channel breakdown — uses invoices.channel (migration_channel_tracking.sql)
-  // Falls back to 'offline' if the column doesn't exist yet
+    // Combined Totals
+    const totalSales = posSales + onlineSales
+    const totalTaxable = posTaxable + onlineTaxable
+    const totalGst = posGst + onlineGst
+    const totalDiscount = posDiscount + onlineDiscount
+    const count = posCount + onlineCount
+
+    return {
+      posSales, posCount,
+      onlineSales, onlineCount,
+      totalSales, totalTaxable, totalGst, totalDiscount, count
+    }
+  }, [filteredInvoices, filteredOnlineOrders])
+
+  // Channel breakdown — uses invoices.channel + online_orders
   const CHANNEL_META = {
     offline:   { label: 'Offline (POS)', color: '#111827', bg: '#f3f4f6' },
-    website:   { label: 'Website',       color: '#2563eb', bg: '#eff6ff' },
+    website:   { label: 'Website (Online)', color: '#2563eb', bg: '#eff6ff' },
     amazon:    { label: 'Amazon',         color: '#f59e0b', bg: '#fffbeb' },
     flipkart:  { label: 'Flipkart',       color: '#3b82f6', bg: '#eff6ff' },
     instagram: { label: 'Instagram',      color: '#ec4899', bg: '#fdf2f8' },
     whatsapp:  { label: 'WhatsApp',       color: '#16a34a', bg: '#dcfce7' },
     other:     { label: 'Other',          color: '#6b7280', bg: '#f9fafb' },
   }
+
   const channelBreakdown = useMemo(() => {
     const map = {}
+    // Invoices
     filteredInvoices.forEach(inv => {
       const ch = inv.channel || 'offline'
       if (!map[ch]) map[ch] = { channel: ch, revenue: 0, count: 0, ...(CHANNEL_META[ch] || {}) }
       map[ch].revenue += Number(inv.grand_total || 0)
       map[ch].count += 1
     })
+    // Online Website Orders
+    if (filteredOnlineOrders.length > 0) {
+      const ch = 'website'
+      if (!map[ch]) map[ch] = { channel: ch, revenue: 0, count: 0, ...(CHANNEL_META[ch] || {}) }
+      filteredOnlineOrders.forEach(ord => {
+        map[ch].revenue += Number(ord.total_amount || 0)
+        map[ch].count += 1
+      })
+    }
     return Object.values(map).sort((a, b) => b.revenue - a.revenue)
-  }, [filteredInvoices])
+  }, [filteredInvoices, filteredOnlineOrders])
+
+  // Unified settled transactions list
+  const settledTransactions = useMemo(() => {
+    const list = []
+    filteredInvoices.forEach(inv => {
+      list.push({
+        id: `inv-${inv.id}`,
+        type: 'POS Invoice',
+        refNumber: inv.invoice_number,
+        date: inv.created_at,
+        channel: inv.channel || 'offline',
+        customerName: inv.customer_name || 'Walk-in Customer',
+        customerPhone: inv.customer_phone || '—',
+        paymentMethod: inv.payment_method || 'Cash',
+        gst: Number(inv.gst_amount || 0),
+        total: Number(inv.grand_total || 0),
+      })
+    })
+    filteredOnlineOrders.forEach(ord => {
+      list.push({
+        id: `ord-${ord.id}`,
+        type: 'Online Order',
+        refNumber: ord.order_number,
+        date: ord.created_at,
+        channel: 'website',
+        customerName: ord.customer_name || 'Website Customer',
+        customerPhone: ord.customer_phone || '—',
+        paymentMethod: ord.payment_method ? `${ord.payment_method}` : 'Razorpay (Online)',
+        gst: Number(ord.gst_amount || 0),
+        total: Number(ord.total_amount || 0),
+      })
+    })
+    return list.sort((a, b) => new Date(b.date) - new Date(a.date))
+  }, [filteredInvoices, filteredOnlineOrders])
 
   const handleExportSalesCSV = () => {
-    const headers = ['Invoice #', 'Date', 'Channel', 'Customer Name', 'Customer Phone', 'Payment Method', 'Subtotal (₹)', 'Discount (₹)', 'GST (₹)', 'Grand Total (₹)', 'WhatsApp Status']
-    const rows = filteredInvoices.map(i => [
-      i.invoice_number,
-      i.created_at ? new Date(i.created_at).toLocaleDateString('en-IN') : '',
-      i.channel || 'offline',
-      i.customer_name,
-      i.customer_phone,
-      i.payment_method,
-      i.subtotal,
-      i.discount_amount,
-      i.gst_amount,
-      i.grand_total,
-      i.whatsapp_status || 'N/A',
+    const headers = ['Record Type', 'Ref / Order #', 'Date', 'Channel', 'Customer Name', 'Customer Phone', 'Payment Method', 'GST (₹)', 'Grand Total (₹)']
+    const rows = settledTransactions.map(t => [
+      t.type,
+      t.refNumber,
+      t.date ? new Date(t.date).toLocaleDateString('en-IN') : '',
+      t.channel === 'website' ? 'Website (Online)' : (CHANNEL_META[t.channel]?.label || 'POS In-Store'),
+      t.customerName,
+      t.customerPhone,
+      t.paymentMethod,
+      t.gst,
+      t.total,
     ])
     exportCSV('wrapstore-sales-report', headers, rows)
   }
@@ -202,7 +293,7 @@ const Reports = () => {
       <div className="section-header">
         <div>
           <div className="section-title">Reports Center</div>
-          <div className="section-subtitle">Official store accounting, inventory valuation, and customer analytics</div>
+          <div className="section-subtitle">Official store accounting, inventory valuation, and omnichannel analytics</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-secondary btn-sm" onClick={() => window.print()}>
@@ -357,7 +448,7 @@ const Reports = () => {
           )}
 
           {/* ==================================================== */}
-          {/* 2. SALES REPORT TAB                                  */}
+          {/* 2. SALES REPORT TAB (OMNICHANNEL)                    */}
           {/* ==================================================== */}
           {activeTab === 'sales' && (
             <div>
@@ -365,7 +456,7 @@ const Reports = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div style={{ display: 'flex', gap: 6 }}>
                   {[
-                    { id: 'all', label: 'All Invoices' },
+                    { id: 'all', label: 'All Transactions' },
                     { id: 'month', label: 'This Month' },
                     { id: 'today', label: 'Today' },
                   ].map(p => (
@@ -383,16 +474,18 @@ const Reports = () => {
                 </button>
               </div>
 
-              {/* Sales KPIs */}
+              {/* Omnichannel Sales KPIs */}
               <div className="stat-grid" style={{ marginBottom: 20 }}>
                 <div className="stat-card">
                   <div className="stat-icon" style={{ background: '#ecfdf5' }}>
                     <TrendingUp size={20} color="#10b981" strokeWidth={2.5} />
                   </div>
                   <div className="stat-content">
-                    <div className="stat-label">Total Revenue</div>
+                    <div className="stat-label">Total Revenue (Combined)</div>
                     <div className="stat-value">{INR(salesSummary.totalSales)}</div>
-                    <div className="stat-sub">{salesSummary.count} invoices settled</div>
+                    <div className="stat-sub">
+                      POS: {INR(salesSummary.posSales)} ({salesSummary.posCount}) · Online: {INR(salesSummary.onlineSales)} ({salesSummary.onlineCount})
+                    </div>
                   </div>
                 </div>
 
@@ -403,7 +496,7 @@ const Reports = () => {
                   <div className="stat-content">
                     <div className="stat-label">Taxable Base</div>
                     <div className="stat-value">{INR(salesSummary.totalTaxable)}</div>
-                    <div className="stat-sub">Before GST addition</div>
+                    <div className="stat-sub">Total revenue before GST</div>
                   </div>
                 </div>
 
@@ -414,7 +507,7 @@ const Reports = () => {
                   <div className="stat-content">
                     <div className="stat-label">GST Collected</div>
                     <div className="stat-value">{INR(salesSummary.totalGst)}</div>
-                    <div className="stat-sub">Govt tax collected</div>
+                    <div className="stat-sub">Govt tax collected across channels</div>
                   </div>
                 </div>
 
@@ -425,7 +518,7 @@ const Reports = () => {
                   <div className="stat-content">
                     <div className="stat-label">Discounts Conceded</div>
                     <div className="stat-value">{INR(salesSummary.totalDiscount)}</div>
-                    <div className="stat-sub">Customer discounts</div>
+                    <div className="stat-sub">Promotions & concessions</div>
                   </div>
                 </div>
               </div>
@@ -434,11 +527,11 @@ const Reports = () => {
               {channelBreakdown.length > 0 && (
                 <div className="card" style={{ marginBottom: 20 }}>
                   <div className="card-header">
-                    <span className="card-title">Revenue by Channel</span>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Breakdown of selected period — totals above are the combined sum</span>
+                    <span className="card-title">Revenue by Channel (POS vs Online)</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Separate breakdown for POS store sales and Website online orders</span>
                   </div>
                   <div className="card-body">
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
                       {channelBreakdown.map(ch => (
                         <div key={ch.channel} style={{
                           background: ch.bg || '#f9fafb',
@@ -450,7 +543,9 @@ const Reports = () => {
                             {ch.label || ch.channel}
                           </div>
                           <div style={{ fontSize: 16, fontWeight: 800 }}>{INR(ch.revenue)}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ch.count} invoice{ch.count !== 1 ? 's' : ''}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                            {ch.count} {ch.channel === 'website' ? 'online order' : 'invoice'}{ch.count !== 1 ? 's' : ''}
+                          </div>
                           <div style={{ marginTop: 6, height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
                             <div style={{
                               width: `${salesSummary.totalSales > 0 ? Math.round((ch.revenue / salesSummary.totalSales) * 100) : 0}%`,
@@ -467,16 +562,22 @@ const Reports = () => {
                 </div>
               )}
 
-              {/* Invoices List */}
+              {/* Omnichannel Settled Transactions List */}
               <div className="card" style={{ padding: 0 }}>
-                <div className="card-header" style={{ padding: '16px 20px' }}>
-                  <span className="card-title">Settled Invoices ({filteredInvoices.length})</span>
+                <div className="card-header" style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span className="card-title">Settled Transactions ({settledTransactions.length})</span>
+                  <div style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                    <span>POS Invoices: <strong>{salesSummary.posCount}</strong></span>
+                    <span>·</span>
+                    <span>Website Orders: <strong>{salesSummary.onlineCount}</strong></span>
+                  </div>
                 </div>
                 <div className="table-container" style={{ border: 'none' }}>
                   <table>
                     <thead>
                       <tr>
-                        <th>Invoice #</th>
+                        <th>Type</th>
+                        <th>Ref / Order #</th>
                         <th>Date</th>
                         <th>Channel</th>
                         <th>Customer</th>
@@ -487,28 +588,37 @@ const Reports = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredInvoices.map(inv => (
-                        <tr key={inv.id}>
-                          <td><code style={{ fontSize: 11, background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>{inv.invoice_number}</code></td>
-                          <td style={{ fontSize: 12 }}>{new Date(inv.created_at).toLocaleDateString('en-IN')}</td>
-                          <td>
-                            {(() => {
-                              const ch = inv.channel || 'offline'
-                              const m = CHANNEL_META[ch] || { label: ch, color: '#6b7280', bg: '#f9fafb' }
-                              return (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: m.color, background: m.bg, padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                  {m.label}
-                                </span>
-                              )
-                            })()}
-                          </td>
-                          <td style={{ fontWeight: 600 }}>{inv.customer_name}</td>
-                          <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{inv.customer_phone}</td>
-                          <td><span className="badge badge-secondary">{inv.payment_method}</span></td>
-                          <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)' }}>{INR(inv.gst_amount)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 800 }}>{INR(inv.grand_total)}</td>
-                        </tr>
-                      ))}
+                      {settledTransactions.map(tr => {
+                        const isOnline = tr.type === 'Online Order'
+                        const ch = tr.channel || (isOnline ? 'website' : 'offline')
+                        const m = CHANNEL_META[ch] || { label: ch, color: '#6b7280', bg: '#f9fafb' }
+
+                        return (
+                          <tr key={tr.id}>
+                            <td>
+                              <span className={`badge ${isOnline ? 'badge-info' : 'badge-secondary'}`} style={{ fontSize: 10 }}>
+                                {tr.type}
+                              </span>
+                            </td>
+                            <td>
+                              <code style={{ fontSize: 11, background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                {tr.refNumber}
+                              </code>
+                            </td>
+                            <td style={{ fontSize: 12 }}>{new Date(tr.date).toLocaleDateString('en-IN')}</td>
+                            <td>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: m.color, background: m.bg, padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                {m.label}
+                              </span>
+                            </td>
+                            <td style={{ fontWeight: 600 }}>{tr.customerName}</td>
+                            <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{tr.customerPhone}</td>
+                            <td><span className="badge badge-secondary">{tr.paymentMethod}</span></td>
+                            <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)' }}>{INR(tr.gst)}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 800 }}>{INR(tr.total)}</td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
