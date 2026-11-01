@@ -115,7 +115,7 @@ const Sidebar = ({ isCollapsed = false, toggleSidebar }) => {
         {/* Overview */}
         {!isCollapsed && <div className="sidebar-section-label">Overview</div>}
         <NavItem to="/dashboard" icon={LayoutDashboard} label="Dashboard" isCollapsed={isCollapsed} />
-        <NavItem to="/online-sales" icon={ShoppingBag} label="Online Sale" isCollapsed={isCollapsed} />
+
 
         {/* Billing & Sales */}
         <div style={{ height: '8px' }} />
