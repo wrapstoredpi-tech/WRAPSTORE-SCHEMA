@@ -329,6 +329,8 @@ const AddCombo = () => {
         product_code: i.product.product_id,
         mobile_model: i.product.mobile_model,
         unit_price: Number(i.product.selling_price) || 0,
+        quantity: 1,
+        unit_quantity: 1,
         allotted_qty: maxPossibleCombos,
         image: i.product.product_images?.find(img => img.is_primary)?.public_url || i.product.product_images?.[0]?.public_url || null,
         combo_image: primaryComboImageUrl,
@@ -810,8 +812,8 @@ const AddCombo = () => {
                               </div>
                             </div>
                           </div>
-                          <div style={{ fontWeight: 700, background: '#f3f4f6', padding: '2px 7px', borderRadius: '12px', fontSize: '11px' }}>
-                            x{item.allotted_qty} allotted
+                          <div style={{ fontWeight: 600, background: '#f3f4f6', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                            1 unit / combo
                           </div>
                         </div>
                       ))}
@@ -1160,9 +1162,8 @@ const AddCombo = () => {
                               padding: '5px 10px',
                               borderRadius: 'var(--radius-sm)'
                             }}>
-                              <Lock size={12} color="#6b7280" />
-                              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>Allotted Qty:</span>
-                              <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--brand-black)' }}>{maxPossibleCombos}</span>
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>In Bundle:</span>
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--brand-black)' }}>1 unit</span>
                             </div>
 
                             <button

@@ -8,6 +8,7 @@ import {
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { updateCombosAfterProductStockChange } from '../lib/comboSync'
 
 const INR = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -557,85 +558,143 @@ const OnlineOrders = () => {
 
     setCancelSaving(true)
     try {
-      // 1. Try atomic cancellation RPC if deployed
-      const { data: rpcRes, error: rpcErr } = await supabase.rpc('cancel_and_restock_online_order', {
-        p_order_id: cancelModalOrder.id,
-        p_reason: reason,
-      })
+      const items = cancelModalOrder.online_order_items || []
+      const affectedProductIds = new Set()
 
-      if (!rpcErr && rpcRes?.success) {
-        toast.success(`Order ${cancelModalOrder.order_number} cancelled and stock restored!`)
-      } else {
-        // 2. Direct stock restoration if RPC not yet deployed
-        const items = cancelModalOrder.online_order_items || []
-        for (const item of items) {
-          if (item.product_id) {
-            // Fetch current stock
+      for (const item of items) {
+        const itemQty = Number(item.quantity) || 1
+
+        // Check if item is a combo bundle
+        const isCombo = item.product_type === 'combo' || Boolean(item.combo_id)
+        if (isCombo) {
+          const comboId = item.combo_id
+          let constituentItems = []
+          if (comboId) {
+            const { data: cItems } = await supabase
+              .from('combo_items')
+              .select('product_id, allotted_qty')
+              .eq('combo_id', comboId)
+            constituentItems = cItems || []
+          }
+          if (constituentItems.length === 0 && comboId) {
+            const { data: comboRec } = await supabase
+              .from('combos')
+              .select('items')
+              .eq('id', comboId)
+              .maybeSingle()
+            if (comboRec?.items) {
+              constituentItems = Array.isArray(comboRec.items)
+                ? comboRec.items
+                : JSON.parse(comboRec.items || '[]')
+            }
+          }
+
+          for (const ci of constituentItems) {
+            if (!ci.product_id) continue
+            // 1 unit of constituent product per combo ordered
+            const restoreQty = 1 * itemQty
             const { data: prod } = await supabase
               .from('products')
               .select('current_stock')
-              .eq('id', item.product_id)
+              .eq('id', ci.product_id)
               .maybeSingle()
 
             if (prod) {
               const prevStock = prod.current_stock
-              const newStock = prevStock + (Number(item.quantity) || 1)
+              const newStock = prevStock + restoreQty
               await supabase
                 .from('products')
                 .update({ current_stock: newStock })
-                .eq('id', item.product_id)
+                .eq('id', ci.product_id)
 
               await supabase.from('inventory_movements').insert({
-                product_id: item.product_id,
+                product_id: ci.product_id,
                 movement_type: 'CUSTOMER_RETURN',
-                quantity: Number(item.quantity) || 1,
+                quantity: restoreQty,
                 previous_stock: prevStock,
                 new_stock: newStock,
-                reason: `Online order cancelled: ${reason}`,
+                reason: `Online order cancelled (Combo returned): ${reason}`,
                 reference_id: cancelModalOrder.order_number,
                 channel: 'website',
               })
+              affectedProductIds.add(ci.product_id)
             }
           }
-        }
+        } else if (item.product_id) {
+          // Standard single product
+          const { data: prod } = await supabase
+            .from('products')
+            .select('current_stock')
+            .eq('id', item.product_id)
+            .maybeSingle()
 
-        // Update order status and refund status
-        const isPaid = cancelModalOrder.payment_status === 'PAID'
-        const updatePayload = {
-          order_status: 'CANCELLED',
-          cancelled_reason: reason,
-          refund_status: isPaid ? 'PROCESSED' : 'NONE',
-          payment_status: isPaid ? 'REFUNDED' : cancelModalOrder.payment_status,
-        }
+          if (prod) {
+            const prevStock = prod.current_stock
+            const newStock = prevStock + itemQty
+            await supabase
+              .from('products')
+              .update({ current_stock: newStock })
+              .eq('id', item.product_id)
 
-        // If refund_status column is not yet in table, fallback without it
-        let { error: ordErr } = await supabase
-          .from('online_orders')
-          .update(updatePayload)
-          .eq('id', cancelModalOrder.id)
-
-        if (ordErr && ordErr.message.includes('column')) {
-          await supabase
-            .from('online_orders')
-            .update({
-              order_status: 'CANCELLED',
-              cancelled_reason: reason,
-              payment_status: isPaid ? 'REFUNDED' : cancelModalOrder.payment_status,
+            await supabase.from('inventory_movements').insert({
+              product_id: item.product_id,
+              movement_type: 'CUSTOMER_RETURN',
+              quantity: itemQty,
+              previous_stock: prevStock,
+              new_stock: newStock,
+              reason: `Online order cancelled: ${reason}`,
+              reference_id: cancelModalOrder.order_number,
+              channel: 'website',
             })
-            .eq('id', cancelModalOrder.id)
+            affectedProductIds.add(item.product_id)
+          }
         }
-
-        // Record refund in payments if payments linked
-        try {
-          await supabase
-            .from('payments')
-            .update({ refund_status: 'PROCESSED', payment_status: 'REFUNDED' })
-            .eq('online_order_id', cancelModalOrder.id)
-        } catch (e) {}
-
-        toast.success(`Order ${cancelModalOrder.order_number} cancelled. Stock restored and refund marked!`)
       }
 
+      // Sync combo availability after stocks restored
+      if (affectedProductIds.size > 0) {
+        try {
+          await updateCombosAfterProductStockChange(Array.from(affectedProductIds))
+        } catch (e) {
+          console.warn('Combo sync after cancel warning:', e)
+        }
+      }
+
+      // Update order status and refund status
+      const isPaid = cancelModalOrder.payment_status === 'PAID'
+      const updatePayload = {
+        order_status: 'CANCELLED',
+        cancelled_reason: reason,
+        refund_status: isPaid ? 'PROCESSED' : 'NONE',
+        payment_status: isPaid ? 'REFUNDED' : cancelModalOrder.payment_status,
+      }
+
+      // If refund_status column is not yet in table, fallback without it
+      let { error: ordErr } = await supabase
+        .from('online_orders')
+        .update(updatePayload)
+        .eq('id', cancelModalOrder.id)
+
+      if (ordErr && ordErr.message.includes('column')) {
+        await supabase
+          .from('online_orders')
+          .update({
+            order_status: 'CANCELLED',
+            cancelled_reason: reason,
+            payment_status: isPaid ? 'REFUNDED' : cancelModalOrder.payment_status,
+          })
+          .eq('id', cancelModalOrder.id)
+      }
+
+      // Record refund in payments if payments linked
+      try {
+        await supabase
+          .from('payments')
+          .update({ refund_status: 'PROCESSED', payment_status: 'REFUNDED' })
+          .eq('online_order_id', cancelModalOrder.id)
+      } catch (e) {}
+
+      toast.success(`Order ${cancelModalOrder.order_number} cancelled. Stock restored and refund marked!`)
       setCancelModalOrder(null)
       setCancelReasonInput('Customer requested cancellation')
       fetchOrders()
