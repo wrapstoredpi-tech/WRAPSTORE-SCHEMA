@@ -129,15 +129,26 @@ const ProductSearch = ({ onAddToCart }) => {
     // Search combos
     let comboResults = []
     try {
-      const { data: comboData } = await supabase
-        .from('combos')
-        .select('*, combo_items(id, allotted_qty, product_id, product_name, product_code, mobile_model, unit_price)')
+      const { data: viewData, error: vErr } = await supabase
+        .from('combos_with_availability')
+        .select('*')
         .eq('is_active', true)
         .or(`name.ilike.%${q}%,combo_code.ilike.%${q}%,code.ilike.%${q}%,description.ilike.%${q}%`)
         .limit(8)
 
-      if (comboData && comboData.length > 0) {
-        comboResults = comboData
+      if (!vErr && viewData && viewData.length > 0) {
+        comboResults = viewData
+      } else {
+        const { data: comboData } = await supabase
+          .from('combos')
+          .select('*, combo_items(id, qty_per_combo, allotted_qty, product_id, product_name, product_code, mobile_model, unit_price)')
+          .eq('is_active', true)
+          .or(`name.ilike.%${q}%,combo_code.ilike.%${q}%,code.ilike.%${q}%,description.ilike.%${q}%`)
+          .limit(8)
+
+        if (comboData && comboData.length > 0) {
+          comboResults = comboData
+        }
       }
     } catch (e) {
       console.warn('Error querying combos in billing:', e)
@@ -170,17 +181,13 @@ const ProductSearch = ({ onAddToCart }) => {
         try { items = JSON.parse(c.items) } catch (e) { items = [] }
       }
 
-      const firstImg = items.find(i => i.image)?.image || null
-      const modelsSummary = items.map(i => `${i.product_name} (x${i.allotted_qty})`).join(', ')
+      const firstImg = c.image_url || items.find(i => i.image)?.image || null
+      const modelsSummary = items.map(i => `${i.product_name || i.name} (${Number(i.qty_per_combo || i.unit_quantity || 1)} unit)`).join(', ')
 
-      // 2. Compute exact stock count directly from DB
-      // In the database (public.combo_items / combos.items), each product has allotted_qty (e.g. 5)
-      let comboStock = 0
-      if (items.length > 0) {
+      let comboStock = Number(c.available_combos)
+      if (isNaN(comboStock)) {
         const quantities = items.map(i => Number(i.allotted_qty)).filter(n => !isNaN(n) && n >= 0)
         comboStock = quantities.length > 0 ? Math.min(...quantities) : 0
-      } else if (c.allotted_qty !== undefined && c.allotted_qty !== null) {
-        comboStock = Number(c.allotted_qty) || 0
       }
 
       return {
@@ -674,23 +681,24 @@ const Billing = () => {
       const stockCheckErrors = []
       for (const item of cart) {
         if (item.isCombo) {
-          // For combo, check underlying items if available
+          // For combo, check underlying items respecting qty_per_combo and reserved_stock
           if (item.combo_items && item.combo_items.length > 0) {
             for (const ci of item.combo_items) {
               if (ci.product_id && isValidUuid(ci.product_id)) {
-                // Each combo sold uses 1 unit of each constituent product
-                const reqQty = 1 * item.qty
+                const qtyPer = Math.max(1, Number(ci.qty_per_combo || ci.unit_quantity || 1) || 1)
+                const reqQty = qtyPer * item.qty
                 const { data: freshProduct } = await supabase
                   .from('products')
-                  .select('current_stock, name, product_id')
+                  .select('current_stock, reserved_stock, name, product_id')
                   .eq('id', ci.product_id)
                   .single()
 
-                if (freshProduct && freshProduct.current_stock < reqQty) {
+                const avail = Math.max(0, (freshProduct?.current_stock || 0) - (freshProduct?.reserved_stock || 0))
+                if (!freshProduct || avail < reqQty) {
                   stockCheckErrors.push({
-                    name: `${item.name} (${ci.product_name})`,
+                    name: `${item.name} (${ci.product_name || freshProduct?.name})`,
                     requested: reqQty,
-                    available: freshProduct.current_stock,
+                    available: avail,
                   })
                 }
               }
@@ -837,44 +845,24 @@ const Billing = () => {
 
       for (const item of cart) {
         if (item.isCombo) {
-          // Deduct stock for each constituent product in combo (1 unit per combo)
-          if (item.combo_items && item.combo_items.length > 0) {
-            for (const ci of item.combo_items) {
-              if (ci.product_id && isValidUuid(ci.product_id)) {
-                affectedProductIds.add(ci.product_id)
-                const qtyToDeduct = 1 * item.qty
-                const { data: rpcResult, error: rpcErr } = await supabase.rpc('deduct_stock', {
-                  p_product_id:   ci.product_id,
-                  p_quantity:     qtyToDeduct,
-                  p_channel:      'POS',
-                  p_reference_id: invoice.id,
-                  p_performed_by: isValidUuid(user?.id) ? user.id : null,
-                })
+          // Atomic combo sale: locks constituent rows in ID order, re-checks availability, deducts, and logs
+          const { data: sellRes, error: sellErr } = await supabase.rpc('sell_combo', {
+            p_combo_id: item.id,
+            p_qty: item.qty,
+            p_channel: 'POS',
+            p_reference: invoice.id,
+            p_performed_by: isValidUuid(user?.id) ? user.id : null,
+          })
 
-                if (rpcErr || !rpcResult?.success) {
-                  // Direct stock deduction fallback
-                  try {
-                    const { data: curP } = await supabase.from('products').select('current_stock').eq('id', ci.product_id).single()
-                    if (curP) {
-                      const newStock = Math.max(0, (curP.current_stock || 0) - qtyToDeduct)
-                      await supabase.from('products').update({ current_stock: newStock }).eq('id', ci.product_id)
-                      await supabase.from('inventory_movements').insert({
-                        product_id: ci.product_id,
-                        movement_type: 'SALE',
-                        quantity: qtyToDeduct,
-                        previous_stock: curP.current_stock,
-                        new_stock: newStock,
-                        reason: `POS Sale: Combo ${item.product_id} (${item.name})`,
-                        reference_id: invoice.id,
-                        performed_by: isValidUuid(user?.id) ? user.id : null,
-                      })
-                    }
-                  } catch (e) {
-                    console.warn('Combo item direct stock deduction error:', e)
-                  }
-                }
-              }
-            }
+          if (sellErr || !sellRes?.success) {
+            const errMsg = sellRes?.error || sellErr?.message || `Failed to deduct stock for combo "${item.name}"`
+            stockDeductErrors.push(errMsg)
+            console.error('Combo sell_combo failed:', errMsg)
+            throw new Error(errMsg)
+          }
+
+          if (Array.isArray(sellRes.items)) {
+            sellRes.items.forEach(it => affectedProductIds.add(it.product_id))
           }
           continue
         }

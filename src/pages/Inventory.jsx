@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Search, Filter, ArrowUpDown, ChevronLeft, ChevronRight,
   Plus, Minus, RotateCcw, AlertTriangle, Trash2,
   History, X, Check, Image as ImageIcon, RefreshCw, Package,
-  TrendingUp, XCircle, ArrowUpRight
+  TrendingUp, XCircle, ArrowUpRight, PackagePlus
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
@@ -319,7 +320,32 @@ const HistoryModal = ({ product, onClose }) => {
                     <div className="movement-meta">
                       {m.previous_stock} → {m.new_stock} units · {formatDate(m.created_at)}
                     </div>
-                    {m.reason && <div className="movement-meta">"{m.reason}"</div>}
+                    {m.reason && (
+                      <div className="movement-meta" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span>"{m.reason}"</span>
+                        {(m.reason.toLowerCase().includes('combo') || (m.movement_type === 'SALE' && m.reason.startsWith('Combo'))) && (
+                          <Link
+                            to="/combos"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              background: '#f3e8ff',
+                              color: '#7e22ce',
+                              border: '1px solid #d8b4fe',
+                              borderRadius: '4px',
+                              padding: '1px 6px',
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              textDecoration: 'none'
+                            }}
+                            title="View Combos"
+                          >
+                            <PackagePlus size={10} /> Combo
+                          </Link>
+                        )}
+                      </div>
+                    )}
                     {m.reference_id && (
                       <div className="movement-meta" style={{ fontSize: '11px', fontFamily: 'monospace' }}>
                         Ref: {m.reference_id}
