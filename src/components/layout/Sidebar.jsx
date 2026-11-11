@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Tag, Package, Warehouse,
+  LayoutDashboard, ShoppingBag, Tag, Package, Warehouse,
   Settings, LogOut, ShieldCheck, Smartphone,
   Receipt, FileText, Users, TrendingUp, Sparkles,
   BarChart2, FileBarChart, Activity, Globe, PackagePlus
@@ -158,6 +158,12 @@ const Sidebar = ({ isCollapsed = false, toggleSidebar }) => {
           to="/online-orders"
           icon={Globe}
           label="Online Orders"
+          isCollapsed={isCollapsed}
+        />
+        <NavItem
+          to="/online-sales"
+          icon={ShoppingBag}
+          label="Manual Channel Sales"
           isCollapsed={isCollapsed}
         />
 
