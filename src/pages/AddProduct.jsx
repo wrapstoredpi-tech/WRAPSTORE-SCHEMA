@@ -28,6 +28,7 @@ const IPHONE_MODELS = [
 ]
 
 const IPHONE_SERIES = [
+  { label: 'iPhone Duo Series', filter: () => IPHONE_MODELS.filter(m => m.toLowerCase().includes('duo')) },
   { label: 'iPhone 18 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 18')) },
   { label: 'iPhone 17 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 17')) },
   { label: 'iPhone 16 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 16')) },
@@ -36,7 +37,6 @@ const IPHONE_SERIES = [
   { label: 'iPhone 13 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 13')) },
   { label: 'iPhone 12 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 12')) },
   { label: 'iPhone 11 Series', filter: () => IPHONE_MODELS.filter(m => m.startsWith('iPhone 11')) },
-  { label: 'iPhone Duo', filter: () => IPHONE_MODELS.filter(m => m.toLowerCase().includes('duo')) },
 ]
 
 const IPAD_MODELS = [
@@ -382,16 +382,16 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     : (form.mobile_brand === 'Apple' || form.product_type === 'iphone_case'
       ? IPHONE_MODELS
       : form.mobile_brand === 'Samsung' || form.product_type === 'samsung_case'
-      ? SAMSUNG_MODELS
-      : [])
+        ? SAMSUNG_MODELS
+        : [])
 
   const seriesOptions = isIpadCategory
     ? IPAD_SERIES
     : (form.mobile_brand === 'Apple' || form.product_type === 'iphone_case'
       ? IPHONE_SERIES
       : form.mobile_brand === 'Samsung' || form.product_type === 'samsung_case'
-      ? SAMSUNG_SERIES
-      : [])
+        ? SAMSUNG_SERIES
+        : [])
 
   const [selectedModels, setSelectedModels] = useState(() => parseModels(prefillData?.mobile_model))
   const [modelSearch, setModelSearch] = useState('')
@@ -648,8 +648,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   // Model Selection Handlers (supports multiple models)
   const toggleModel = (m) => {
     const current = parseModels(variantDraft.model)
-    const updated = current.includes(m)
-      ? current.filter(x => x !== m)
+    const isPresent = current.includes(m) || (m === 'iPhone Duo' && current.includes('Duo')) || (m === 'Duo' && current.includes('iPhone Duo'))
+    const updated = isPresent
+      ? current.filter(x => x !== m && !(m === 'iPhone Duo' && x === 'Duo') && !(m === 'Duo' && x === 'iPhone Duo'))
       : [...current, m]
     const updatedStr = updated.join(', ')
     setVariantDraft(prev => ({ ...prev, model: updatedStr }))
@@ -659,9 +660,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   const handleSeriesToggle = (filterFn) => {
     const current = parseModels(variantDraft.model)
     const modelsInSeries = typeof filterFn === 'function' ? filterFn() : []
-    const allSelected = modelsInSeries.length > 0 && modelsInSeries.every(m => current.includes(m))
+    const allSelected = modelsInSeries.length > 0 && modelsInSeries.every(m => current.includes(m) || (m === 'iPhone Duo' && current.includes('Duo')))
     const updated = allSelected
-      ? current.filter(m => !modelsInSeries.includes(m))
+      ? current.filter(m => !modelsInSeries.includes(m) && !(m === 'Duo' && modelsInSeries.includes('iPhone Duo')))
       : Array.from(new Set([...current, ...modelsInSeries]))
     const updatedStr = updated.join(', ')
     setVariantDraft(prev => ({ ...prev, model: updatedStr }))
@@ -1662,7 +1663,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                                   }}
                                 >
                                   {(seriesOptions[activeSeriesIdx]?.filter() || []).length > 0 &&
-                                   (seriesOptions[activeSeriesIdx]?.filter() || []).every(m => parseModels(variantDraft.model).includes(m))
+                                    (seriesOptions[activeSeriesIdx]?.filter() || []).every(m => parseModels(variantDraft.model).includes(m) || (m === 'iPhone Duo' && parseModels(variantDraft.model).includes('Duo')))
                                     ? 'Deselect series'
                                     : 'Select all in series'}
                                 </button>
@@ -1671,7 +1672,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', maxHeight: '130px', overflowY: 'auto' }}>
                               {(seriesOptions[activeSeriesIdx]?.filter() || modelOptions).map(m => {
-                                const isSelected = parseModels(variantDraft.model).includes(m)
+                                const isSelected = parseModels(variantDraft.model).includes(m) || (m === 'iPhone Duo' && parseModels(variantDraft.model).includes('Duo'))
+                                const displayName = (m === 'iPhone Duo' || m === 'Duo') ? 'Duo' : m
                                 return (
                                   <button
                                     key={m}
@@ -1695,7 +1697,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                                     }}
                                   >
                                     {isSelected && <span style={{ fontSize: '10px', fontWeight: 800 }}>✓</span>}
-                                    {m}
+                                    {displayName}
                                   </button>
                                 )
                               })}

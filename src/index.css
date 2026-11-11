@@ -1803,7 +1803,20 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: not-allowed;
 }
 
+@page {
+  size: 4in 4in landscape;
+  margin: 0.1in 0.365in 0.1in 0.365in;
+}
+
 @media print {
+  html, body {
+    width: 4in;
+    height: 4in;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   .sidebar, .header, .toolbar, button, .pagination {
     display: none !important;
   }

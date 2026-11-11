@@ -10,7 +10,7 @@ import {
   Package, Warehouse, TrendingUp, AlertTriangle,
   XCircle, ArrowUpRight, Clock, CheckCircle2, RefreshCw,
   ShoppingBag, CreditCard, MessageCircle, Sparkles,
-  ChevronRight, BarChart2, Globe
+  ChevronRight, BarChart2, Globe, Calendar
 } from 'lucide-react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
@@ -21,6 +21,13 @@ import { useAuth } from '../contexts/AuthContext'
 
 const INR = (val) => '₹' + Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const INR_SHORT = (val) => '₹' + Number(val || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+
+const getLocalDateString = (d = new Date()) => {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 const PRODUCT_TYPE_LABELS = {
   iphone_case: 'iPhone Cases',
@@ -57,6 +64,11 @@ const Dashboard = () => {
   const [invoices, setInvoices] = useState([])
   const [invoiceItems, setInvoiceItems] = useState([])
   const [onlineOrders, setOnlineOrders] = useState([])
+
+  // Calendar / Date Range filter state (affects Row 1 sales cards & Row 2 channel revenue)
+  const [dateRange, setDateRange] = useState('today') // 'today', 'yesterday', 'week', 'month', 'all', 'custom'
+  const [customStart, setCustomStart] = useState(getLocalDateString())
+  const [customEnd, setCustomEnd] = useState(getLocalDateString())
 
   const fetchData = async () => {
     setLoading(true)
@@ -100,17 +112,157 @@ const Dashboard = () => {
     fetchData()
   }, [])
 
-  // Derived Metrics
-  const metrics = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10)
-    const todayInvoices = invoices.filter(i => i.created_at?.startsWith(todayStr))
-    const todayOnline = (onlineOrders || []).filter(o => o.created_at?.startsWith(todayStr))
+  // Calculate date bounds based on selected dateRange and custom inputs
+  const getDateBounds = () => {
+    const now = new Date()
+    let start = new Date()
+    let end = new Date()
 
-    const todayPosSales = todayInvoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
-    const todayOnlineSales = todayOnline.reduce((s, o) => s + Number(o.grand_total || 0), 0)
-    const todayCombinedSales = todayPosSales + todayOnlineSales
-    const todayOrdersCount = todayInvoices.length + todayOnline.length
+    if (dateRange === 'today') {
+      start.setHours(0, 0, 0, 0)
+      end.setHours(23, 59, 59, 999)
+    } else if (dateRange === 'yesterday') {
+      start.setDate(start.getDate() - 1)
+      start.setHours(0, 0, 0, 0)
+      end.setDate(end.getDate() - 1)
+      end.setHours(23, 59, 59, 999)
+    } else if (dateRange === 'week') {
+      const day = now.getDay() || 7 // Monday as first day
+      start.setDate(now.getDate() - day + 1)
+      start.setHours(0, 0, 0, 0)
+      end.setHours(23, 59, 59, 999)
+    } else if (dateRange === 'month') {
+      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+    } else if (dateRange === 'all') {
+      start = new Date(2020, 0, 1, 0, 0, 0, 0)
+      end.setHours(23, 59, 59, 999)
+    } else if (dateRange === 'custom') {
+      if (customStart) {
+        const [y, m, d] = customStart.split('-').map(Number)
+        start = new Date(y, m - 1, d, 0, 0, 0, 0)
+      } else {
+        start.setHours(0, 0, 0, 0)
+      }
+      if (customEnd) {
+        const [y, m, d] = customEnd.split('-').map(Number)
+        end = new Date(y, m - 1, d, 23, 59, 59, 999)
+      } else if (customStart) {
+        const [y, m, d] = customStart.split('-').map(Number)
+        end = new Date(y, m - 1, d, 23, 59, 59, 999)
+      } else {
+        end.setHours(23, 59, 59, 999)
+      }
+      if (start.getTime() > end.getTime()) {
+        const tmp = start
+        start = end
+        end = tmp
+      }
+    }
 
+    return { start, end }
+  }
+
+  // Formatted date label showing active range
+  const rangeLabel = useMemo(() => {
+    const { start, end } = getDateBounds()
+    const options = { day: 'numeric', month: 'short' }
+    if (dateRange === 'today') {
+      return `Today (${start.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})`
+    }
+    if (dateRange === 'yesterday') {
+      return `Yesterday (${start.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})`
+    }
+    if (dateRange === 'week') {
+      return `This Week (${start.toLocaleDateString('en-IN', options)} – ${end.toLocaleDateString('en-IN', { ...options, year: 'numeric' })})`
+    }
+    if (dateRange === 'month') {
+      return `This Month (${start.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })})`
+    }
+    if (dateRange === 'all') {
+      return 'All Time'
+    }
+    if (customStart === customEnd) {
+      return `${start.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
+    }
+    return `${start.toLocaleDateString('en-IN', options)} – ${end.toLocaleDateString('en-IN', { ...options, year: 'numeric' })}`
+  }, [dateRange, customStart, customEnd])
+
+  const salesCardLabel = useMemo(() => {
+    if (dateRange === 'today') return "Today's Total Sales"
+    if (dateRange === 'yesterday') return "Yesterday's Sales"
+    if (dateRange === 'week') return "This Week's Sales"
+    if (dateRange === 'month') return "This Month's Sales"
+    if (dateRange === 'all') return "All-Time Sales"
+    return "Total Sales"
+  }, [dateRange])
+
+  const ordersCardLabel = useMemo(() => {
+    if (dateRange === 'today') return "Orders Today"
+    if (dateRange === 'yesterday') return "Yesterday's Orders"
+    if (dateRange === 'week') return "This Week's Orders"
+    if (dateRange === 'month') return "This Month's Orders"
+    if (dateRange === 'all') return "All-Time Orders"
+    return "Total Orders"
+  }, [dateRange])
+
+  // Date-filtered metrics (First Two Rows: Sales card, Orders card, and Channel Breakdown)
+  const filteredMetrics = useMemo(() => {
+    const { start, end } = getDateBounds()
+    const startTime = start.getTime()
+    const endTime = end.getTime()
+
+    const filteredInvoices = invoices.filter(i => {
+      if (!i.created_at) return false
+      const t = new Date(i.created_at).getTime()
+      return t >= startTime && t <= endTime
+    })
+
+    const filteredOnline = (onlineOrders || []).filter(o => {
+      if (!o.created_at) return false
+      const t = new Date(o.created_at).getTime()
+      return t >= startTime && t <= endTime
+    })
+
+    const posSales = filteredInvoices.reduce((s, i) => s + Number(i.grand_total || 0), 0)
+    const onlineSales = filteredOnline.reduce((s, o) => s + Number(o.grand_total || 0), 0)
+    const combinedSales = posSales + onlineSales
+    const posOrdersCount = filteredInvoices.length
+    const onlineOrdersCount = filteredOnline.length
+    const ordersCount = posOrdersCount + onlineOrdersCount
+
+    const channels = [
+      {
+        channel: 'offline',
+        label: 'POS Counter',
+        color: '#111827',
+        bg: '#f3f4f6',
+        revenue: posSales,
+        count: posOrdersCount,
+      },
+      {
+        channel: 'website',
+        label: 'Online Website',
+        color: '#2563eb',
+        bg: '#eff6ff',
+        revenue: onlineSales,
+        count: onlineOrdersCount,
+      },
+    ]
+
+    return {
+      posSales,
+      onlineSales,
+      combinedSales,
+      posOrdersCount,
+      onlineOrdersCount,
+      ordersCount,
+      channels,
+    }
+  }, [invoices, onlineOrders, dateRange, customStart, customEnd])
+
+  // Catalog & Inventory Snapshot Metrics (Independent of date range)
+  const catalogMetrics = useMemo(() => {
     const approved = products.filter(p => p.approval_status === 'APPROVED' || !p.approval_status)
     const pendingApproval = products.filter(p => p.approval_status === 'PENDING_APPROVAL')
     const activeCatalog = products.length > 0 ? products : []
@@ -120,12 +272,6 @@ const Dashboard = () => {
     const outOfStock = activeCatalog.filter(p => Number(p.current_stock || 0) === 0)
 
     return {
-      todayCombinedSales,
-      todayPosSales,
-      todayOnlineSales,
-      todayInvoicesCount: todayInvoices.length,
-      todayOnlineCount: todayOnline.length,
-      todayOrdersCount,
       totalProducts: products.length,
       pendingApprovalCount: pendingApproval.length,
       totalStock,
@@ -133,7 +279,7 @@ const Dashboard = () => {
       lowStockCount: lowStock.length,
       outOfStockCount: outOfStock.length,
     }
-  }, [products, invoices, onlineOrders])
+  }, [products])
 
   // Sales Overview Chart: Both POS invoices and Online Orders as separate lines + combined total
   const salesOverviewData = useMemo(() => {
@@ -212,28 +358,12 @@ const Dashboard = () => {
     return Object.values(map).sort((a, b) => b.units - a.units).slice(0, 5)
   }, [invoiceItems, onlineOrders])
 
-  // Channel Revenue Breakdown (POS Invoices + Online Website Orders)
-  const channelBreakdown = useMemo(() => {
-    const map = {
-      offline: { channel: 'offline', label: 'POS Counter', color: '#111827', bg: '#f3f4f6', revenue: 0, count: 0 },
-      website: { channel: 'website', label: 'Online Website', color: '#2563eb', bg: '#eff6ff', revenue: 0, count: 0 },
-    }
-
-    invoices.forEach(inv => {
-      map.offline.revenue += Number(inv.grand_total || 0)
-      map.offline.count += 1
-    })
-
-    onlineOrders.forEach(ord => {
-      map.website.revenue += Number(ord.grand_total || 0)
-      map.website.count += 1
-    })
-
-    return Object.values(map).filter(ch => ch.count > 0 || ch.revenue > 0)
-  }, [invoices, onlineOrders])
-
   // Recent Invoices (Latest 6)
   const recentInvoices = useMemo(() => invoices.slice(0, 6), [invoices])
+
+  const combinedTotal = filteredMetrics.combinedSales
+  const posPercent = combinedTotal > 0 ? ((filteredMetrics.posSales / combinedTotal) * 100).toFixed(1) : '0.0'
+  const onlinePercent = combinedTotal > 0 ? ((filteredMetrics.onlineSales / combinedTotal) * 100).toFixed(1) : '0.0'
 
   if (loading) {
     return (
@@ -246,7 +376,7 @@ const Dashboard = () => {
   return (
     <div>
       {/* Action Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Store Operations, POS & Live Website Channels</div>
         </div>
@@ -257,25 +387,128 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Required Metrics Cards */}
+      {/* Calendar Date Range Filter Bar */}
+      <div className="card" style={{ padding: '12px 16px', marginBottom: 20 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          {/* Quick presets */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 700,
+              color: 'var(--text-secondary)',
+              marginRight: 6
+            }}>
+              <Calendar size={14} />
+              <span>Date Range:</span>
+            </div>
+            {[
+              { id: 'today', label: 'Today' },
+              { id: 'yesterday', label: 'Yesterday' },
+              { id: 'week', label: 'This Week' },
+              { id: 'month', label: 'This Month' },
+              { id: 'all', label: 'All Time' },
+              { id: 'custom', label: 'Custom Range' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`btn btn-sm ${dateRange === tab.id ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ borderRadius: 'var(--radius)', fontSize: 12, padding: '4px 10px', height: 28 }}
+                onClick={() => setDateRange(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Custom Date Pickers & Active Range Indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {dateRange === 'custom' && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: '#f9fafb',
+                padding: '3px 8px',
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--border)'
+              }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
+                <input
+                  type="date"
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: 12,
+                    height: 28,
+                    border: '1.5px solid var(--border-strong)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    outline: 'none'
+                  }}
+                  value={customStart}
+                  onChange={e => setCustomStart(e.target.value)}
+                />
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
+                <input
+                  type="date"
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: 12,
+                    height: 28,
+                    border: '1.5px solid var(--border-strong)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    outline: 'none'
+                  }}
+                  value={customEnd}
+                  onChange={e => setCustomEnd(e.target.value)}
+                />
+              </div>
+            )}
+            <div style={{
+              fontSize: 11,
+              color: 'var(--text-secondary)',
+              background: '#f3f4f6',
+              padding: '5px 10px',
+              borderRadius: 'var(--radius)',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5
+            }}>
+              <Calendar size={12} color="var(--text-muted)" />
+              <span>{rangeLabel}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Required Metrics Cards (Row 1: Sales & Orders change with selected date range) */}
       <div className="stat-grid" style={{ marginBottom: 20 }}>
-        {/* 1. Today's Combined Sales */}
+        {/* 1. Combined Sales for selected range */}
         <StatCard
           icon={TrendingUp}
-          label="Today's Total Sales"
-          value={INR(metrics.todayCombinedSales)}
-          sub={`POS: ${INR(metrics.todayPosSales)} · Online: ${INR(metrics.todayOnlineSales)}`}
+          label={salesCardLabel}
+          value={INR(filteredMetrics.combinedSales)}
+          sub={`POS: ${INR(filteredMetrics.posSales)} · Online: ${INR(filteredMetrics.onlineSales)}`}
           iconBg="#ecfdf5"
           iconColor="#10b981"
           onClick={() => navigate('/sales')}
         />
 
-        {/* 2. Orders Today (Combined) */}
+        {/* 2. Orders Count for selected range */}
         <StatCard
           icon={ShoppingBag}
-          label="Orders Today"
-          value={metrics.todayOrdersCount}
-          sub={`${metrics.todayInvoicesCount} POS + ${metrics.todayOnlineCount} Website`}
+          label={ordersCardLabel}
+          value={filteredMetrics.ordersCount}
+          sub={`${filteredMetrics.posOrdersCount} POS + ${filteredMetrics.onlineOrdersCount} Website`}
           iconBg="#eff6ff"
           iconColor="#3b82f6"
           onClick={() => navigate('/online-orders')}
@@ -285,7 +518,7 @@ const Dashboard = () => {
         <StatCard
           icon={Package}
           label="Total Products"
-          value={metrics.totalProducts}
+          value={catalogMetrics.totalProducts}
           sub="Catalog inventory items"
           iconBg="#f3f4f6"
           iconColor="#111827"
@@ -296,7 +529,7 @@ const Dashboard = () => {
         <StatCard
           icon={Warehouse}
           label="Total Stock"
-          value={metrics.totalStock.toLocaleString()}
+          value={catalogMetrics.totalStock.toLocaleString()}
           sub="Physical units in store"
           iconBg="#eff6ff"
           iconColor="#3b82f6"
@@ -304,11 +537,11 @@ const Dashboard = () => {
         />
 
         {/* Super admin approval queue (if applicable) */}
-        {isSuperAdmin && metrics.pendingApprovalCount > 0 && (
+        {isSuperAdmin && catalogMetrics.pendingApprovalCount > 0 && (
           <StatCard
             icon={Clock}
             label="Pending Approval"
-            value={metrics.pendingApprovalCount}
+            value={catalogMetrics.pendingApprovalCount}
             sub="Awaiting admin sign-off"
             iconBg="#f5f3ff"
             iconColor="#8b5cf6"
@@ -317,50 +550,259 @@ const Dashboard = () => {
         )}
       </div>
 
-      {/* Channel Revenue Breakdown */}
-      {channelBreakdown.length > 0 && (
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div className="card-header">
-            <span className="card-title">Revenue by Channel (POS vs Online Website)</span>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Separate streams with combined oversight</span>
+      {/* Channel Revenue Breakdown - Unified Single Tile */}
+      <div className="card" style={{ marginBottom: 20, padding: 0, overflow: 'hidden' }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '14px 20px',
+          borderBottom: '1px solid var(--border)',
+          flexWrap: 'wrap',
+          gap: 8,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="card-title" style={{ margin: 0 }}>
+              Revenue by Channel
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              (POS vs Online Website)
+            </span>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--text-secondary)',
+              background: '#f3f4f6',
+              padding: '2px 8px',
+              borderRadius: 4,
+            }}>
+              {rangeLabel}
+            </span>
           </div>
-          <div className="card-body">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
-              {channelBreakdown.map(ch => (
-                <div key={ch.channel} style={{
-                  background: ch.bg || '#f9fafb',
-                  borderRadius: 'var(--radius)',
-                  padding: '14px 16px',
-                  border: `1.5px solid ${ch.color}22`,
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Separate streams with combined oversight
+          </span>
+        </div>
+
+        {/* 3 Metrics Integrated Under One Tile */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          background: 'var(--bg-card)',
+        }}>
+          {/* Section 1: POS Counter */}
+          <div style={{
+            padding: '18px 22px',
+            borderRight: '1px solid var(--border)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  background: '#f3f4f6',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#111827',
                 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: ch.color, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {ch.channel === 'website' ? <Globe size={13} /> : <ShoppingBag size={13} />}
-                    {ch.label}
+                  <ShoppingBag size={15} strokeWidth={2.5} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#111827', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    POS Counter
                   </div>
-                  <div style={{ fontSize: 20, fontWeight: 800 }}>{INR(ch.revenue)}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ch.count} order{ch.count !== 1 ? 's' : ''}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    In-Store Checkout
+                  </div>
                 </div>
-              ))}
-              <div style={{
-                background: '#f0fdf4',
-                borderRadius: 'var(--radius)',
-                padding: '14px 16px',
-                border: '1.5px solid #bbf7d0',
+              </div>
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#111827',
+                background: '#f3f4f6',
+                padding: '2px 8px',
+                borderRadius: 4,
               }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-                  Combined Total
+                {posPercent}%
+              </span>
+            </div>
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: '#111827', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                {INR(filteredMetrics.posSales)}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                <strong style={{ color: 'var(--text-primary)' }}>{filteredMetrics.posOrdersCount}</strong> order{filteredMetrics.posOrdersCount !== 1 ? 's' : ''} recorded
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Online Website */}
+          <div style={{
+            padding: '18px 22px',
+            borderRight: '1px solid var(--border)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  background: '#eff6ff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#2563eb',
+                }}>
+                  <Globe size={15} strokeWidth={2.5} />
                 </div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#15803d' }}>
-                  {INR(channelBreakdown.reduce((sum, ch) => sum + ch.revenue, 0))}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Online Website
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Live Web Store
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: '#16a34a', marginTop: 2 }}>
-                  {channelBreakdown.reduce((sum, ch) => sum + ch.count, 0)} total orders
+              </div>
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#2563eb',
+                background: '#eff6ff',
+                padding: '2px 8px',
+                borderRadius: 4,
+              }}>
+                {onlinePercent}%
+              </span>
+            </div>
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: '#2563eb', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                {INR(filteredMetrics.onlineSales)}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                <strong style={{ color: '#2563eb' }}>{filteredMetrics.onlineOrdersCount}</strong> order{filteredMetrics.onlineOrdersCount !== 1 ? 's' : ''} placed
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Combined Total */}
+          <div style={{
+            padding: '18px 22px',
+            background: '#fcfdfd',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  background: '#ecfdf5',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#16a34a',
+                }}>
+                  <Sparkles size={15} strokeWidth={2.5} />
                 </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Combined Total
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Unified Omnichannel
+                  </div>
+                </div>
+              </div>
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#16a34a',
+                background: '#ecfdf5',
+                padding: '2px 8px',
+                borderRadius: 4,
+              }}>
+                100%
+              </span>
+            </div>
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: '#15803d', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                {INR(filteredMetrics.combinedSales)}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                <strong style={{ color: '#15803d' }}>{filteredMetrics.ordersCount}</strong> total order{filteredMetrics.ordersCount !== 1 ? 's' : ''}
               </div>
             </div>
           </div>
         </div>
-      )}
+
+        {/* Visual Ratio Progress Bar */}
+        <div style={{ padding: '0 22px 18px 22px', background: 'var(--bg-card)' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            marginBottom: 6,
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#111827' }} />
+              POS Share: <strong>{posPercent}%</strong>
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#2563eb' }} />
+              Online Share: <strong>{onlinePercent}%</strong>
+            </span>
+          </div>
+
+          <div style={{
+            width: '100%',
+            height: 7,
+            borderRadius: 99,
+            background: '#f3f4f6',
+            overflow: 'hidden',
+            display: 'flex',
+          }}>
+            {combinedTotal > 0 ? (
+              <>
+                <div
+                  style={{
+                    width: `${posPercent}%`,
+                    background: '#111827',
+                    transition: 'width 0.4s ease',
+                  }}
+                  title={`POS Counter: ${INR(filteredMetrics.posSales)} (${posPercent}%)`}
+                />
+                <div
+                  style={{
+                    width: `${onlinePercent}%`,
+                    background: '#2563eb',
+                    transition: 'width 0.4s ease',
+                  }}
+                  title={`Online Website: ${INR(filteredMetrics.onlineSales)} (${onlinePercent}%)`}
+                />
+              </>
+            ) : (
+              <div style={{ width: '100%', background: '#e5e7eb' }} />
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Sales Overview & Inventory Overview Charts */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1.1fr', gap: 20, marginBottom: 20 }}>

@@ -9,6 +9,7 @@ const PAGE_META = {
   '/products':           { title: 'Products',            subtitle: 'Browse and manage your cases and stickers catalog' },
   '/products/add':       { title: 'Add Product',         subtitle: 'Create a new product listing' },
   '/products/approval':  { title: 'Product Approvals',   subtitle: 'Review and approve pending products' },
+  '/approvals':          { title: 'Product Approvals',   subtitle: 'Review and approve pending products' },
   '/inventory':          { title: 'Inventory',            subtitle: 'Track physical stock levels and movement audit logs' },
   '/smart-inventory':    { title: 'Smart Inventory',      subtitle: 'Dynamic intelligence, 30-day velocity, and restock alerts' },
   '/billing':            { title: 'New Invoice',          subtitle: 'Create physical store sales and dispatch PDF invoices' },

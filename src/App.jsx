@@ -89,6 +89,9 @@ const AppRoutes = () => (
       <Route path="products/approval" element={
         <ProtectedRoute requireSuperAdmin={true}><ProductApproval /></ProtectedRoute>
       } />
+      <Route path="approvals" element={
+        <ProtectedRoute requireSuperAdmin={true}><ProductApproval /></ProtectedRoute>
+      } />
       <Route path="inventory" element={<Inventory />} />
       <Route path="smart-inventory" element={<SmartInventory />} />
 

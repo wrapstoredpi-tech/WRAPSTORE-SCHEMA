@@ -855,6 +855,39 @@ const Billing = () => {
           })
 
           if (sellErr || !sellRes?.success) {
+            // Graceful fallback if sell_combo RPC is missing or fails on channel constraint
+            const isFallbackNeeded =
+              sellErr?.message?.includes('schema cache') ||
+              sellErr?.message?.includes('Could not find the function') ||
+              sellErr?.message?.includes('inventory_movements_channel_check')
+
+            if (isFallbackNeeded && item.combo_items && item.combo_items.length > 0) {
+              console.warn('sell_combo failed or missing; using direct stock deduction fallback:', sellErr?.message)
+              for (const ci of item.combo_items) {
+                if (ci.product_id && isValidUuid(ci.product_id)) {
+                  affectedProductIds.add(ci.product_id)
+                  const qtyPer = Math.max(1, Number(ci.qty_per_combo || ci.unit_quantity || 1) || 1)
+                  const qtyToDeduct = qtyPer * item.qty
+                  const { data: curP } = await supabase.from('products').select('current_stock').eq('id', ci.product_id).single()
+                  if (curP) {
+                    const newStock = Math.max(0, (curP.current_stock || 0) - qtyToDeduct)
+                    await supabase.from('products').update({ current_stock: newStock }).eq('id', ci.product_id)
+                    await supabase.from('inventory_movements').insert({
+                      product_id: ci.product_id,
+                      movement_type: 'SALE',
+                      quantity: qtyToDeduct,
+                      previous_stock: curP.current_stock,
+                      new_stock: newStock,
+                      reason: `POS Sale: Combo ${item.product_id || item.combo_code || item.name}`,
+                      reference_id: invoice.id,
+                      performed_by: isValidUuid(user?.id) ? user.id : null,
+                    })
+                  }
+                }
+              }
+              continue
+            }
+
             const errMsg = sellRes?.error || sellErr?.message || `Failed to deduct stock for combo "${item.name}"`
             stockDeductErrors.push(errMsg)
             console.error('Combo sell_combo failed:', errMsg)

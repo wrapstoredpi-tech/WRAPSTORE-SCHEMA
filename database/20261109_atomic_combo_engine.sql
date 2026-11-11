@@ -68,6 +68,14 @@ ALTER TABLE public.products
   ADD CONSTRAINT products_reserved_stock_non_negative
   CHECK (reserved_stock >= 0);
 
+-- Allow both 'offline' and 'pos' on inventory_movements.channel
+ALTER TABLE public.inventory_movements
+  DROP CONSTRAINT IF EXISTS inventory_movements_channel_check;
+
+ALTER TABLE public.inventory_movements
+  ADD CONSTRAINT inventory_movements_channel_check
+  CHECK (channel IN ('offline','pos','website','amazon','flipkart','instagram','whatsapp','other'));
+
 -- ------------------------------------------------------------------------------
 -- 3. TRIGGERS: Bump combos.updated_at
 -- ------------------------------------------------------------------------------
@@ -136,7 +144,7 @@ combo_summary AS (
     combo_id,
     COUNT(*) AS total_items,
     MIN(possible_from_item) AS available_combos,
-    MAX(CASE WHEN rank_limiting = 1 THEN product_id END) AS limiting_product_id,
+    MAX(CASE WHEN rank_limiting = 1 THEN product_id::text END)::uuid AS limiting_product_id,
     MAX(CASE WHEN rank_limiting = 1 THEN product_name END) AS limiting_product_name,
     MAX(CASE WHEN rank_limiting = 1 THEN available_stock END) AS limiting_product_stock,
     MAX(CASE WHEN rank_limiting = 1 THEN qty_per_combo END) AS limiting_qty_per_combo
@@ -209,8 +217,13 @@ BEGIN
     RETURN jsonb_build_object('success', FALSE, 'error', 'Combo is currently inactive');
   END IF;
 
-  v_channel_norm := CASE WHEN UPPER(COALESCE(p_channel, 'POS')) = 'POS' THEN 'pos' ELSE 'website' END;
-  v_movement_type := CASE WHEN UPPER(COALESCE(p_channel, 'POS')) = 'POS' THEN 'SALE' ELSE 'ONLINE_SALE' END;
+  v_channel_norm := CASE
+    WHEN LOWER(COALESCE(p_channel, 'offline')) IN ('pos', 'offline') THEN 'offline'
+    WHEN LOWER(p_channel) IN ('online', 'web', 'website') THEN 'website'
+    WHEN LOWER(p_channel) IN ('amazon', 'flipkart', 'instagram', 'whatsapp', 'other') THEN LOWER(p_channel)
+    ELSE 'offline'
+  END;
+  v_movement_type := CASE WHEN v_channel_norm = 'offline' THEN 'SALE' ELSE 'ONLINE_SALE' END;
 
   -- Verify combo has constituent items
   IF NOT EXISTS (SELECT 1 FROM public.combo_items WHERE combo_id = p_combo_id) THEN
@@ -252,7 +265,7 @@ BEGIN
     -- Availability check:
     -- If POS: available = current_stock - reserved_stock
     -- If Online: if stock was already reserved during checkout, available = current_stock
-    IF UPPER(COALESCE(p_channel, 'POS')) = 'POS' THEN
+    IF v_channel_norm = 'offline' THEN
       IF (COALESCE(v_product.current_stock, 0) - COALESCE(v_product.reserved_stock, 0)) < v_req_qty THEN
         RETURN jsonb_build_object(
           'success', FALSE,
@@ -291,7 +304,7 @@ BEGIN
     SET current_stock = current_stock - v_req_qty,
         -- If online sale with previous reservation, clear the reservation
         reserved_stock = CASE
-          WHEN UPPER(COALESCE(p_channel, 'POS')) != 'POS' THEN GREATEST(0, reserved_stock - v_req_qty)
+          WHEN v_channel_norm != 'offline' THEN GREATEST(0, reserved_stock - v_req_qty)
           ELSE reserved_stock
         END,
         updated_at = NOW()

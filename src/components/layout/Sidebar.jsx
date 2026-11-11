@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, ShoppingBag, Tag, Package, Warehouse,
+  LayoutDashboard, Tag, Package, Warehouse,
   Settings, LogOut, ShieldCheck, Smartphone,
   Receipt, FileText, Users, TrendingUp, Sparkles,
   BarChart2, FileBarChart, Activity, Globe, PackagePlus
@@ -10,24 +10,43 @@ import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../lib/supabase'
 import logo from '../../assets/logo.png'
 
-const NavItem = ({ to, icon: Icon, label, badge, isCollapsed }) => (
-  <NavLink
-    to={to}
-    className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-    style={{ textDecoration: 'none' }}
-    title={isCollapsed ? `${label}${badge > 0 ? ` (${badge})` : ''}` : undefined}
-  >
-    <Icon size={18} strokeWidth={2} style={{ flexShrink: 0 }} />
-    {!isCollapsed && <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>}
-    {!isCollapsed && badge > 0 && <span className="sidebar-nav-badge">{badge}</span>}
-    {isCollapsed && (
-      <div className="sidebar-tooltip">
-        {label}
-        {badge > 0 && ` (${badge})`}
-      </div>
-    )}
-  </NavLink>
-)
+const NavItem = ({ to, icon: Icon, label, badge, isCollapsed }) => {
+  const location = useLocation()
+
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) => {
+        let active = isActive
+        // Products should NOT be highlighted when viewing Approvals or Add Combo
+        if (to === '/products' && (location.pathname.startsWith('/products/approval') || location.pathname.startsWith('/products/add-combo'))) {
+          active = false
+        }
+        // Add Combo (/combos) should be highlighted if navigating to /products/add-combo
+        if (to === '/combos' && location.pathname.startsWith('/products/add-combo')) {
+          active = true
+        }
+        // Approvals should be highlighted on /products/approval or /approvals
+        if (to === '/products/approval' && (location.pathname.startsWith('/products/approval') || location.pathname.startsWith('/approvals'))) {
+          active = true
+        }
+        return `sidebar-nav-item ${active ? 'active' : ''}`
+      }}
+      style={{ textDecoration: 'none' }}
+      title={isCollapsed ? `${label}${badge > 0 ? ` (${badge})` : ''}` : undefined}
+    >
+      <Icon size={18} strokeWidth={2} style={{ flexShrink: 0 }} />
+      {!isCollapsed && <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>}
+      {!isCollapsed && badge > 0 && <span className="sidebar-nav-badge">{badge}</span>}
+      {isCollapsed && (
+        <div className="sidebar-tooltip">
+          {label}
+          {badge > 0 && ` (${badge})`}
+        </div>
+      )}
+    </NavLink>
+  )
+}
 
 const Sidebar = ({ isCollapsed = false, toggleSidebar }) => {
   const { profile, signOut, isSuperAdmin } = useAuth()
@@ -52,26 +71,6 @@ const Sidebar = ({ isCollapsed = false, toggleSidebar }) => {
 
     return () => supabase.removeChannel(channel)
   }, [isSuperAdmin])
-
-  // Live count of online orders that need action
-  const [onlineOrdersCount, setOnlineOrdersCount] = useState(0)
-  useEffect(() => {
-    const fetchOnlineOrders = async () => {
-      const { count } = await supabase
-        .from('online_orders')
-        .select('*', { count: 'exact', head: true })
-        .in('order_status', ['PENDING', 'CONFIRMED', 'PROCESSING'])
-      setOnlineOrdersCount(count || 0)
-    }
-    fetchOnlineOrders()
-
-    const channel = supabase
-      .channel('online-orders-sidebar')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'online_orders' }, fetchOnlineOrders)
-      .subscribe()
-
-    return () => supabase.removeChannel(channel)
-  }, [])
 
   const handleLogout = async () => {
     await signOut()
@@ -159,13 +158,6 @@ const Sidebar = ({ isCollapsed = false, toggleSidebar }) => {
           to="/online-orders"
           icon={Globe}
           label="Online Orders"
-          badge={onlineOrdersCount}
-          isCollapsed={isCollapsed}
-        />
-        <NavItem
-          to="/online-sales"
-          icon={ShoppingBag}
-          label="Manual Channel Sales"
           isCollapsed={isCollapsed}
         />
 
