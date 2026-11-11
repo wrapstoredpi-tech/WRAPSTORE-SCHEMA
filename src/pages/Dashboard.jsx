@@ -328,7 +328,7 @@ const Dashboard = () => {
         map[key] = {
           code: it.product_id_code,
           name: it.product_name,
-          model: it.mobile_model || '—',
+          model: it.billed_model || it.mobile_model || '—',
           units: 0,
           revenue: 0,
         }
@@ -345,7 +345,7 @@ const Dashboard = () => {
           map[key] = {
             code: it.product_id_code || 'ONL-SKU',
             name: it.product_name,
-            model: it.mobile_model || '—',
+            model: it.billed_model || it.mobile_model || '—',
             units: 0,
             revenue: 0,
           }

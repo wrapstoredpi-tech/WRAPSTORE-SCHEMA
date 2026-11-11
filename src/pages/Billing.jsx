@@ -17,6 +17,31 @@ import { updateCombosAfterProductStockChange } from '../lib/comboSync'
 const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
 const INR = (v) => '₹' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+const parseModels = (val) => {
+  if (!val) return []
+  if (Array.isArray(val)) return val.map(s => String(s).trim()).filter(Boolean)
+  return String(val)
+    .split(/[,;\n]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+const getSupportedModels = (item) => {
+  if (!item) return []
+  if (Array.isArray(item.compatible_models) && item.compatible_models.length > 0) {
+    return Array.from(new Set(item.compatible_models.map(m => String(m).trim()).filter(Boolean)))
+  }
+  if (typeof item.mobile_model === 'string' && item.mobile_model.trim()) {
+    const list = parseModels(item.mobile_model).filter(
+      m => m.toLowerCase() !== 'universal' && m.toLowerCase() !== 'standard'
+    )
+    if (list.length > 0) {
+      return Array.from(new Set(list))
+    }
+  }
+  return []
+}
+
 const PAYMENT_METHODS = [
   { id: 'Cash', label: 'Cash', icon: Banknote },
   { id: 'UPI', label: 'UPI', icon: Smartphone },
@@ -115,6 +140,7 @@ const ProductSearch = ({ onAddToCart }) => {
           color_variants: color,
           mobile_brand: acc.brand_name || 'Universal',
           mobile_model: models.join(', ') || 'Universal',
+          compatible_models: models,
           selling_price: v.selling_price || 0,
           mrp: v.mrp || 0,
           current_stock: v.quantity || 0,
@@ -125,6 +151,11 @@ const ProductSearch = ({ onAddToCart }) => {
         }
       })
     })
+
+    const mappedProds = (prodData || []).map(p => ({
+      ...p,
+      compatible_models: parseModels(p.mobile_model),
+    }))
 
     // Search combos
     let comboResults = []
@@ -210,7 +241,7 @@ const ProductSearch = ({ onAddToCart }) => {
       }
     })
 
-    const mergedResults = [...(prodData || []), ...mappedAcc, ...mappedCombos].slice(0, 10)
+    const mergedResults = [...mappedProds, ...mappedAcc, ...mappedCombos].slice(0, 10)
     setResults(mergedResults)
     setShowResults(true)
     setSearching(false)
@@ -356,20 +387,24 @@ const ProductSearch = ({ onAddToCart }) => {
 }
 
 // ---- Cart Item Row ----
-const CartItemRow = ({ item, onQtyChange, onRemove }) => {
+const CartItemRow = ({ item, onQtyChange, onRemove, onModelChange }) => {
   const lineSubtotal = item.selling_price * item.qty
   const discAmt = lineSubtotal * (item.discount_percentage / 100)
   const taxable = lineSubtotal - discAmt
   const gst = taxable * (item.gst_percentage / 100)
   const lineTotal = taxable + gst
 
+  const supportedModels = getSupportedModels(item)
+  const hasMultipleModels = supportedModels.length > 1
+  const isModelMissing = hasMultipleModels && !item.billed_model
+
   return (
     <div style={{
       display: 'grid',
       gridTemplateColumns: '40px 1fr auto auto auto',
-      gap: 10,
+      gap: 12,
       alignItems: 'center',
-      padding: '10px 0',
+      padding: '12px 0',
       borderBottom: '1px solid var(--border)',
     }}>
       {/* Image */}
@@ -400,9 +435,41 @@ const CartItemRow = ({ item, onQtyChange, onRemove }) => {
           )}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>{item.product_id}</code>
-          {item.mobile_model && <span>{item.mobile_model}</span>}
+
+          {item.billed_model ? (
+            <span style={{
+              background: '#eff6ff',
+              color: '#1d4ed8',
+              fontWeight: 600,
+              padding: '1px 6px',
+              borderRadius: 4,
+              border: '1px solid #bfdbfe',
+              fontSize: 10
+            }}>
+              Model: {item.billed_model}
+            </span>
+          ) : isModelMissing ? (
+            <span style={{
+              background: '#fef2f2',
+              color: '#dc2626',
+              fontWeight: 600,
+              padding: '1px 6px',
+              borderRadius: 4,
+              border: '1px solid #fecaca',
+              fontSize: 10
+            }}>
+              ⚠ Select model below price
+            </span>
+          ) : supportedModels.length > 0 ? (
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {item.mobile_model || `${supportedModels.length} models`}
+            </span>
+          ) : item.mobile_model ? (
+            <span>{item.mobile_model}</span>
+          ) : null}
+
           <span style={{ color: 'var(--text-muted)' }}>GST {item.gst_percentage}%</span>
         </div>
         {!item.isCombo && item.qty > item.current_stock && (
@@ -412,10 +479,40 @@ const CartItemRow = ({ item, onQtyChange, onRemove }) => {
         )}
       </div>
 
-      {/* Price */}
-      <div style={{ textAlign: 'right', fontSize: 12, minWidth: 70 }}>
+      {/* Price & Model Dropdown */}
+      <div style={{ textAlign: 'right', fontSize: 12, minWidth: 145 }}>
         <div style={{ fontWeight: 600 }}>{INR(item.selling_price)}</div>
         {item.discount_percentage > 0 && <div style={{ color: 'var(--danger)', fontSize: 10 }}>-{item.discount_percentage}%</div>}
+
+        {supportedModels.length > 0 && (
+          <div style={{ marginTop: 4 }}>
+            <select
+              value={item.billed_model || ''}
+              onChange={(e) => onModelChange(item.id, e.target.value)}
+              style={{
+                width: '100%',
+                maxWidth: 150,
+                fontSize: 11,
+                padding: '3px 6px',
+                borderRadius: '6px',
+                border: isModelMissing ? '1.5px solid #dc2626' : '1px solid var(--border-strong, #d1d5db)',
+                background: isModelMissing ? '#fef2f2' : 'white',
+                color: item.billed_model ? '#111827' : '#6b7280',
+                fontWeight: item.billed_model ? 600 : 500,
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+              title={item.billed_model ? `Selected model: ${item.billed_model}` : "Select phone model given to customer"}
+            >
+              <option value="" disabled={supportedModels.length > 1}>
+                {supportedModels.length > 1 ? '— Select Model * —' : 'Select Model'}
+              </option>
+              {supportedModels.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Qty controls */}
@@ -633,6 +730,9 @@ const Billing = () => {
   const hasStockIssues = cart.some(item => item.qty > item.current_stock)
 
   const addToCart = (product) => {
+    const supported = getSupportedModels(product)
+    const initialBilledModel = product.billed_model || (supported.length === 1 ? supported[0] : '')
+
     setCart(prev => {
       const existing = prev.find(i => i.id === product.id)
       if (existing) {
@@ -643,8 +743,17 @@ const Billing = () => {
         return prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i)
       }
       const img = product.product_images?.find(i => i.is_primary)?.public_url || product.product_images?.[0]?.public_url
-      return [...prev, { ...product, qty: 1, _img: img }]
+      return [...prev, {
+        ...product,
+        qty: 1,
+        _img: img,
+        billed_model: initialBilledModel,
+      }]
     })
+  }
+
+  const updateBilledModel = (id, billedModel) => {
+    setCart(prev => prev.map(i => i.id === id ? { ...i, billed_model: billedModel } : i))
   }
 
   const updateQty = (id, qty) => {
@@ -672,6 +781,15 @@ const Billing = () => {
     if (!customerName.trim()) { toast.error('Customer name is required.'); return }
     if (!customerPhone.trim()) { toast.error('Customer WhatsApp number is required.'); return }
     if (hasStockIssues) { toast.error('Fix stock quantity issues before completing the sale.'); return }
+
+    // Ensure model selection for items that have multiple supported models
+    for (const item of cart) {
+      const supported = getSupportedModels(item)
+      if (supported.length > 1 && !item.billed_model) {
+        toast.error(`Please select a phone model for "${item.name}" from the dropdown below the price.`)
+        return
+      }
+    }
 
     setSubmitting(true)
     setStockErrors([])
@@ -795,6 +913,8 @@ const Billing = () => {
         const taxable = lineSubtotal - discAmt
         const gst = taxable * (item.gst_percentage / 100)
         const lineTotal = Math.round((taxable + gst) * 100) / 100
+        const supported = getSupportedModels(item)
+        const chosenModel = item.billed_model || (supported.length === 1 ? supported[0] : (item.mobile_model || null))
 
         return {
           invoice_id: invoice.id,
@@ -804,6 +924,7 @@ const Billing = () => {
           product_type: item.product_type || (item.isCombo ? 'combo' : 'general'),
           mobile_brand: item.mobile_brand || null,
           mobile_model: item.mobile_model || null,
+          billed_model: chosenModel,
           quantity: item.qty,
           unit_price: item.selling_price,
           discount_pct: item.discount_percentage || 0,
@@ -812,11 +933,20 @@ const Billing = () => {
         }
       })
 
-      const { error: itemsErr } = await supabase
+      let { error: itemsErr } = await supabase
         .from('invoice_items')
         .insert(invoiceItemsPayload)
 
-      if (itemsErr) throw itemsErr
+      if (itemsErr) {
+        if (itemsErr.message?.includes('billed_model') || itemsErr.code === '42703' || itemsErr.details?.includes('billed_model')) {
+          console.warn('billed_model column not found on invoice_items, inserting fallback without it:', itemsErr)
+          const fallbackPayload = invoiceItemsPayload.map(({ billed_model, ...rest }) => rest)
+          const { error: fallbackErr } = await supabase.from('invoice_items').insert(fallbackPayload)
+          if (fallbackErr) throw fallbackErr
+        } else {
+          throw itemsErr
+        }
+      }
 
       // ---- STEP 4b: Update Customer Totals (ONLY AFTER INVOICE & ITEMS SUCCEED) ----
       if (customerId) {
@@ -1064,6 +1194,7 @@ const Billing = () => {
                       item={item}
                       onQtyChange={updateQty}
                       onRemove={removeFromCart}
+                      onModelChange={updateBilledModel}
                     />
                   ))}
 

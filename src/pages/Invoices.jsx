@@ -122,7 +122,7 @@ const InvoiceModal = ({ invoice, onClose, onInvoiceUpdated }) => {
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{item.product_name}</div>
                         <code style={{ fontSize: 10, background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>{item.product_id_code}</code>
                       </td>
-                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.mobile_model || '—'}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.billed_model || item.mobile_model || '—'}</td>
                       <td style={{ textAlign: 'center', fontWeight: 700 }}>{item.quantity}</td>
                       <td style={{ textAlign: 'right' }}>{INR(item.unit_price)}</td>
                       <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{item.gst_pct}%</td>

@@ -289,6 +289,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   product_type     TEXT NOT NULL,
   mobile_brand     TEXT,
   mobile_model     TEXT,
+  billed_model     TEXT,
   quantity         INT NOT NULL CHECK (quantity > 0),
   unit_price       NUMERIC(10,2) NOT NULL,
   discount_pct     NUMERIC(5,2) NOT NULL DEFAULT 0,

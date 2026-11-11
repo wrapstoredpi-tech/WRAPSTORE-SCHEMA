@@ -270,7 +270,7 @@ const Sales = () => {
           code: it.product_id_code,
           name: it.product_name,
           type: it.product_type,
-          model: it.mobile_model || '—',
+          model: it.billed_model || it.mobile_model || '—',
           units: 0,
           revenue: 0,
         }
@@ -286,7 +286,7 @@ const Sales = () => {
           code: 'WEB',
           name: it.product_name,
           type: it.product_type,
-          model: it.mobile_model || '—',
+          model: it.billed_model || it.mobile_model || '—',
           units: 0,
           revenue: 0,
         }

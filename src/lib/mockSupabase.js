@@ -194,10 +194,10 @@ const INITIAL_STORE = {
   ],
 
   invoice_items: [
-    { id: 'ii-001', invoice_id: 'inv-001', product_id: 'prod-001', product_id_code: 'WS-000001', product_name: 'iPhone 16 Pro Max Transparent Case', product_type: 'iphone_case', mobile_brand: 'Apple', mobile_model: 'iPhone 16 Pro Max', quantity: 1, unit_price: 299, discount_pct: 0, gst_pct: 18, line_total: 299, created_at: d(10) },
-    { id: 'ii-002', invoice_id: 'inv-002', product_id: 'prod-003', product_id_code: 'WS-000003', product_name: 'Samsung Galaxy S24 Ultra Leather Case', product_type: 'samsung_case', mobile_brand: 'Samsung', mobile_model: 'Samsung Galaxy S24 Ultra', quantity: 1, unit_price: 499, discount_pct: 0, gst_pct: 18, line_total: 499, created_at: d(5) },
-    { id: 'ii-003', invoice_id: 'inv-003', product_id: 'prod-006', product_id_code: 'WS-000006', product_name: 'Anime Sticker Pack — 10 Designs', product_type: 'mobile_sticker', mobile_brand: '', mobile_model: '', quantity: 1, unit_price: 199, discount_pct: 0, gst_pct: 12, line_total: 199, created_at: d(7) },
-    { id: 'ii-004', invoice_id: 'inv-004', product_id: 'prod-004', product_id_code: 'WS-000004', product_name: 'Samsung Galaxy S25 Ultra Carbon Case', product_type: 'samsung_case', mobile_brand: 'Samsung', mobile_model: 'Samsung Galaxy S25 Ultra', quantity: 1, unit_price: 449, discount_pct: 5, gst_pct: 18, line_total: 449, created_at: d(3) },
+    { id: 'ii-001', invoice_id: 'inv-001', product_id: 'prod-001', product_id_code: 'WS-000001', product_name: 'iPhone 16 Pro Max Transparent Case', product_type: 'iphone_case', mobile_brand: 'Apple', mobile_model: 'iPhone 16 Pro Max', billed_model: 'iPhone 16 Pro Max', quantity: 1, unit_price: 299, discount_pct: 0, gst_pct: 18, line_total: 299, created_at: d(10) },
+    { id: 'ii-002', invoice_id: 'inv-002', product_id: 'prod-003', product_id_code: 'WS-000003', product_name: 'Samsung Galaxy S24 Ultra Leather Case', product_type: 'samsung_case', mobile_brand: 'Samsung', mobile_model: 'Samsung Galaxy S24 Ultra', billed_model: 'Samsung Galaxy S24 Ultra', quantity: 1, unit_price: 499, discount_pct: 0, gst_pct: 18, line_total: 499, created_at: d(5) },
+    { id: 'ii-003', invoice_id: 'inv-003', product_id: 'prod-006', product_id_code: 'WS-000006', product_name: 'Anime Sticker Pack — 10 Designs', product_type: 'mobile_sticker', mobile_brand: '', mobile_model: '', billed_model: null, quantity: 1, unit_price: 199, discount_pct: 0, gst_pct: 12, line_total: 199, created_at: d(7) },
+    { id: 'ii-004', invoice_id: 'inv-004', product_id: 'prod-004', product_id_code: 'WS-000004', product_name: 'Samsung Galaxy S25 Ultra Carbon Case', product_type: 'samsung_case', mobile_brand: 'Samsung', mobile_model: 'Samsung Galaxy S25 Ultra', billed_model: 'Samsung Galaxy S25 Ultra', quantity: 1, unit_price: 449, discount_pct: 5, gst_pct: 18, line_total: 449, created_at: d(3) },
   ],
 
   payments: [

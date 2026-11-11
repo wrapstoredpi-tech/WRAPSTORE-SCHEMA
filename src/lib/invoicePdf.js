@@ -246,7 +246,8 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
     const productName = getFormattedProductName(rawProd) || item.product_name || 'Product'
 
     const metaParts = []
-    if (item.mobile_model) metaParts.push(`Model: ${item.mobile_model}`)
+    const modelToDisplay = item.billed_model || item.mobile_model
+    if (modelToDisplay) metaParts.push(`Model: ${modelToDisplay}`)
     if (item.product_id_code) metaParts.push(`ID: ${item.product_id_code}`)
     if (item.discount_pct > 0) metaParts.push(`Disc: ${item.discount_pct}%`)
     if (item.gst_pct > 0) metaParts.push(`GST: ${item.gst_pct}%`)
