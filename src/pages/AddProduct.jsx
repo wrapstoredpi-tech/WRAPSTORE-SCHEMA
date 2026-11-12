@@ -157,15 +157,17 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     }))
     setVariantDraft(prev => ({
       ...prev,
-      images: [...prev.images, ...newImgs]
+      images: [...(prev.images || []), ...newImgs]
     }))
+    setImages(prev => [...(prev || []), ...newImgs])
   }
 
   const removeVariantImage = (id) => {
     setVariantDraft(prev => ({
       ...prev,
-      images: prev.images.filter(img => img.id !== id)
+      images: (prev.images || []).filter(img => img.id !== id)
     }))
+    setImages(prev => (prev || []).filter(img => img.id !== id))
   }
 
   const handleAddOrUpdateVariant = () => {
@@ -199,6 +201,11 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     const assignedMah = isPowerBank ? (variantDraft.mah || null) : null
     const assignedStrapMm = isWatchStrap ? (variantDraft.strap_mm || null) : null
 
+    // Retain uploaded images so they persist across variants in a multi-variant batch
+    const currentImgs = (variantDraft.images && variantDraft.images.length > 0)
+      ? variantDraft.images
+      : (images && images.length > 0 ? images : [])
+
     if (editingVariantId) {
       setVariantsList(prev => prev.map(v => v.id === editingVariantId ? {
         ...variantDraft,
@@ -206,7 +213,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         model: assignedModel || v.model || null,
         mah: assignedMah || v.mah || null,
         strap_mm: assignedStrapMm || v.strap_mm || null,
-        images: (variantDraft.images && variantDraft.images.length > 0) ? variantDraft.images : images,
+        images: currentImgs,
         id: editingVariantId,
       } : v))
       setEditingVariantId(null)
@@ -221,7 +228,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         model: assignedModel,
         mah: assignedMah,
         strap_mm: assignedStrapMm,
-        images: (variantDraft.images && variantDraft.images.length > 0) ? variantDraft.images : images,
+        images: currentImgs,
         purchase_price: '0',
         id: (productId || prefillData?.id) && variantsList.length === 0
           ? `variant-existing-${productId || prefillData?.id}`
@@ -230,6 +237,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       }
       setVariantsList(prev => [...prev, newVar])
       toast.success('Product variant added!')
+    }
+
+    if (currentImgs.length > 0) {
+      setImages(currentImgs)
     }
 
     setVariantDraft({
@@ -244,7 +255,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       model: '',
       mah: '',
       strap_mm: '',
-      images: [],
+      images: currentImgs, // Keep image previews active for subsequent variants
     })
   }
 
@@ -693,43 +704,81 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     setShowAddColorInput(false)
   }
 
-  // Upload images helper
-  const uploadImages = async (productUuid, targetImages = images) => {
+  // Upload images helper with batch deduplication cache
+  const uploadImages = async (productUuid, targetImages = images, uploadCache = new Map(), isTargetOriginal = false) => {
     const results = []
-    if (!targetImages || targetImages.length === 0) return results
+    if (!targetImages || targetImages.length === 0 || !productUuid) return results
 
     for (let i = 0; i < targetImages.length; i++) {
       const img = targetImages[i]
       const isPrimary = img.isPrimary || i === 0
 
-      // Skip existing images that are already uploaded and saved in database
+      // If image is already an existing DB image (has existing: true or preview URL)
       if (img.existing) {
+        if (isTargetOriginal) {
+          // This original product record already has this image row in DB, so skip re-inserting
+          continue
+        }
+        // When batch-creating variants or applying existing images to another variant product
+        results.push({
+          product_id: productUuid,
+          storage_path: img.storage_path || img.preview || '',
+          public_url: img.public_url || img.preview || '',
+          is_primary: isPrimary,
+          sort_order: i,
+          file_name: img.file_name || 'image.png',
+          file_size: img.file_size || 0,
+        })
         continue
       }
 
       if (img.file) {
-        const ext = (img.file.name || 'image.png').split('.').pop()
-        const path = `products/${productUuid}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        // Cache key based on file identity to prevent re-uploading the exact same binary repeatedly for 10+ variants
+        const cacheKey = `${img.file.name}_${img.file.size}_${img.file.lastModified || 0}`
+        let fileUploadInfo = uploadCache.get(cacheKey)
 
-        const { error: uploadErr } = await supabase.storage
-          .from('product-images')
-          .upload(path, img.file, { contentType: img.file.type || 'image/jpeg', cacheControl: '3600', upsert: false })
+        if (!fileUploadInfo) {
+          const ext = (img.file.name || 'image.png').split('.').pop()
+          const path = `products/${productUuid}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
-        if (uploadErr) {
-          console.error('Supabase storage upload error:', uploadErr)
-          toast.error(`Image upload failed: ${uploadErr.message}`)
-          continue
+          const { error: uploadErr } = await supabase.storage
+            .from('product-images')
+            .upload(path, img.file, { contentType: img.file.type || 'image/jpeg', cacheControl: '3600', upsert: false })
+
+          if (uploadErr) {
+            console.error('Supabase storage upload error:', uploadErr)
+            toast.error(`Image upload failed: ${uploadErr.message}`)
+            continue
+          }
+
+          const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(path)
+          fileUploadInfo = {
+            storage_path: path,
+            public_url: publicUrl,
+            file_name: img.file.name,
+            file_size: img.file.size,
+          }
+          uploadCache.set(cacheKey, fileUploadInfo)
         }
 
-        const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(path)
         results.push({
           product_id: productUuid,
-          storage_path: path,
-          public_url: publicUrl,
+          storage_path: fileUploadInfo.storage_path,
+          public_url: fileUploadInfo.public_url,
           is_primary: isPrimary,
           sort_order: i,
-          file_name: img.file.name,
-          file_size: img.file.size,
+          file_name: fileUploadInfo.file_name,
+          file_size: fileUploadInfo.file_size,
+        })
+      } else if (img.preview && typeof img.preview === 'string' && img.preview.startsWith('http')) {
+        results.push({
+          product_id: productUuid,
+          storage_path: img.storage_path || img.preview,
+          public_url: img.preview,
+          is_primary: isPrimary,
+          sort_order: i,
+          file_name: img.file_name || 'image.png',
+          file_size: img.file_size || 0,
         })
       }
     }
@@ -864,6 +913,16 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       }
 
       let createdCount = 0
+
+      // In-memory batch upload cache to avoid uploading identical image files repeatedly across 10+ variants
+      const batchUploadCache = new Map()
+
+      // Master fallback images across all sources (images state, variantDraft, or any variant in effectiveVariants)
+      const masterFallbackImages = (images && images.length > 0)
+        ? images
+        : (variantDraft.images && variantDraft.images.length > 0)
+          ? variantDraft.images
+          : (effectiveVariants.find(v => v.images && v.images.length > 0)?.images || [])
 
       // Iterate through variants and create EACH variant as a single standalone product
       for (let i = 0; i < effectiveVariants.length; i++) {
@@ -1021,7 +1080,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         }
 
         // Upload images for this product variant
-        const targetImgs = (v.images && v.images.length > 0) ? v.images : images
+        const targetImgs = (v.images && v.images.length > 0) ? v.images : masterFallbackImages
         if (targetImgs && targetImgs.length > 0 && productUuid) {
           setUploadingImages(true)
 
@@ -1040,10 +1099,13 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
             }
           }
 
-          // Upload only newly added images
-          const newImageRecords = await uploadImages(productUuid, targetImgs)
+          // Upload newly added images (deduplicated across the batch) and generate DB image records
+          const newImageRecords = await uploadImages(productUuid, targetImgs, batchUploadCache, Boolean(targetId))
           if (newImageRecords.length > 0) {
-            await supabase.from('product_images').insert(newImageRecords)
+            const { error: insertImgErr } = await supabase.from('product_images').insert(newImageRecords)
+            if (insertImgErr) {
+              console.warn('Failed to insert product_images rows:', insertImgErr.message)
+            }
             // Attach to local product record if local fallback was used
             if (isLocalFallback) {
               const localProds = getLocalProducts()

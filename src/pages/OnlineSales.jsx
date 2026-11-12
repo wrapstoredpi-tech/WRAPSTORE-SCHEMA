@@ -1,73 +1,143 @@
 // ============================================================
 // WRAPSTORE — ONLINE SALES (Manual Channel Logging)
-// Logs sales made via Amazon, Flipkart, Instagram, WhatsApp, Other.
+// Logs sales made via Instagram, WhatsApp, Other.
 // Website orders are handled separately via the Online Orders page
 // (they flow automatically through invoices with channel='website').
 // All reads/writes go through Supabase — no localStorage fallback.
 // ============================================================
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ShoppingBag, Plus, Search, RefreshCw, Trash2,
-  AlertCircle, CheckCircle2, Package, TrendingUp,
-  Calendar, ChevronDown
+  CheckCircle2, Package, TrendingUp, Calendar, X, Phone, User
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { updateCombosAfterProductStockChange } from '../lib/comboSync'
+import { getFormattedProductName } from '../lib/productUtils'
 
 const INR = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-// Website is intentionally excluded — those orders flow automatically
-// via invoices.channel='website' through the Online Orders page.
+// Active channels for manual sales (Instagram, WhatsApp, Other)
 const CHANNELS = [
-  { id: 'amazon',    label: 'Amazon',    color: '#ff9900', bg: '#fff8f0' },
-  { id: 'flipkart',  label: 'Flipkart',  color: '#2874f0', bg: '#f0f5ff' },
   { id: 'instagram', label: 'Instagram', color: '#e1306c', bg: '#fff0f5' },
-  { id: 'whatsapp',  label: 'WhatsApp',  color: '#25d366', bg: '#f0fff5' },
-  { id: 'other',     label: 'Other',     color: '#6b7280', bg: '#f9fafb' },
+  { id: 'whatsapp', label: 'WhatsApp', color: '#25d366', bg: '#f0fff5' },
+  { id: 'other', label: 'Other', color: '#6b7280', bg: '#f9fafb' },
 ]
 
-const CHANNEL_MAP = Object.fromEntries(CHANNELS.map(c => [c.id, c]))
+// All channels map (including legacy amazon/flipkart so existing records render cleanly)
+const CHANNEL_MAP = {
+  instagram: { id: 'instagram', label: 'Instagram', color: '#e1306c', bg: '#fff0f5' },
+  whatsapp: { id: 'whatsapp', label: 'WhatsApp', color: '#25d366', bg: '#f0fff5' },
+  other: { id: 'other', label: 'Other', color: '#6b7280', bg: '#f9fafb' },
+  amazon: { id: 'amazon', label: 'Amazon', color: '#ff9900', bg: '#fff8f0' },
+  flipkart: { id: 'flipkart', label: 'Flipkart', color: '#2874f0', bg: '#f0f5ff' },
+}
 
 // ---- Log Sale Form ----
 const LogSaleForm = ({ onSaved }) => {
   const { user } = useAuth()
-  const [channel, setChannel] = useState('amazon')
+  const [channel, setChannel] = useState('instagram')
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState([])
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [quantity, setQuantity] = useState(1)
   const [unitPrice, setUnitPrice] = useState('')
   const [customerName, setCustomerName] = useState('')
-  const [notes, setNotes] = useState('')
+  const [customerPhone, setCustomerPhone] = useState('')
   const [saleDate, setSaleDate] = useState(new Date().toISOString().slice(0, 10))
   const [saving, setSaving] = useState(false)
   const [searching, setSearching] = useState(false)
+  const searchContainerRef = useRef(null)
 
-  // Product search
+  // Close dropdown on click outside
   useEffect(() => {
-    if (!productQuery || productQuery.length < 2) { setProductResults([]); return }
-    const t = setTimeout(async () => {
-      setSearching(true)
-      const { data } = await supabase
+    const handleClickOutside = (e) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target)) {
+        setProductResults([])
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Product search function
+  const searchProducts = useCallback(async (query) => {
+    const q = (query || '').trim()
+    setSearching(true)
+    try {
+      let req = supabase
         .from('products')
-        .select('id, product_id, name, product_type, mobile_brand, mobile_model, selling_price, current_stock')
+        .select('id, product_id, name, product_type, mobile_brand, mobile_model, color_variants, selling_price, current_stock, product_images(public_url, is_primary)')
         .eq('approval_status', 'APPROVED')
         .eq('is_active', true)
-        .or(`name.ilike.%${productQuery}%,product_id.ilike.%${productQuery}%,mobile_model.ilike.%${productQuery}%`)
-        .limit(8)
-      setProductResults(data || [])
+
+      if (q) {
+        req = req.or(`name.ilike.%${q}%,product_id.ilike.%${q}%,mobile_model.ilike.%${q}%,mobile_brand.ilike.%${q}%,color_variants.ilike.%${q}%`)
+      }
+
+      const { data, error } = await req.order('created_at', { ascending: false }).limit(10)
+
+      if (error) {
+        console.warn('Product search error:', error)
+        // Fallback simple search
+        const { data: fbData } = await supabase
+          .from('products')
+          .select('id, product_id, name, product_type, mobile_brand, mobile_model, color_variants, selling_price, current_stock')
+          .eq('is_active', true)
+          .ilike('name', `%${q}%`)
+          .limit(10)
+        setProductResults(fbData || [])
+      } else {
+        setProductResults(data || [])
+      }
+    } catch (err) {
+      console.error('Failed to search products:', err)
+      setProductResults([])
+    } finally {
       setSearching(false)
-    }, 300)
+    }
+  }, [])
+
+  // Search when typing
+  useEffect(() => {
+    const q = productQuery.trim()
+    if (!q) {
+      setProductResults([])
+      return
+    }
+
+    // Don't search if the input matches already selected product
+    if (selectedProduct && (getFormattedProductName(selectedProduct) || selectedProduct.name) === productQuery) {
+      return
+    }
+
+    const t = setTimeout(() => {
+      searchProducts(q)
+    }, 200)
+
     return () => clearTimeout(t)
-  }, [productQuery])
+  }, [productQuery, selectedProduct, searchProducts])
+
+  // Also load products when user focuses empty input
+  const handleInputFocus = () => {
+    if (!selectedProduct && productResults.length === 0) {
+      searchProducts(productQuery)
+    }
+  }
 
   const selectProduct = (p) => {
     setSelectedProduct(p)
-    setUnitPrice(String(p.selling_price))
-    setProductQuery(p.name)
+    setUnitPrice(String(p.selling_price || ''))
+    setProductQuery(getFormattedProductName(p) || p.name)
+    setProductResults([])
+  }
+
+  const clearSelectedProduct = () => {
+    setSelectedProduct(null)
+    setProductQuery('')
+    setUnitPrice('')
     setProductResults([])
   }
 
@@ -81,36 +151,46 @@ const LogSaleForm = ({ onSaved }) => {
     setSaving(true)
     try {
       // 1. Insert the online_sales record
-      const { error: saleErr } = await supabase
-        .from('online_sales')
-        .insert({
-          product_id:    selectedProduct.id,
-          quantity,
-          channel,
-          unit_price:    parseFloat(unitPrice),
-          total_amount:  totalAmount,
-          customer_name: customerName.trim() || null,
-          notes:         notes.trim() || null,
-          sale_date:     saleDate,
-          created_by:    user?.id ?? null,
-        })
+      const payload = {
+        product_id: selectedProduct.id,
+        quantity,
+        channel,
+        unit_price: parseFloat(unitPrice),
+        total_amount: totalAmount,
+        customer_name: customerName.trim() || null,
+        customer_phone: customerPhone.trim() || null,
+        notes: customerPhone.trim() ? `Phone: ${customerPhone.trim()}` : null,
+        sale_date: saleDate,
+        created_by: user?.id ?? null,
+      }
 
-      if (saleErr) throw saleErr
+      let { error: saleErr } = await supabase
+        .from('online_sales')
+        .insert(payload)
+
+      // Graceful fallback if customer_phone column is not yet created in Supabase table
+      if (saleErr && (saleErr.message?.includes('customer_phone') || saleErr.code === '42703')) {
+        console.warn('customer_phone column missing on online_sales, inserting fallback without it:', saleErr)
+        const { customer_phone, ...fallbackPayload } = payload
+        const { error: fbErr } = await supabase.from('online_sales').insert(fallbackPayload)
+        if (fbErr) throw fbErr
+      } else if (saleErr) {
+        throw saleErr
+      }
 
       // 2. Atomic stock deduction via DB function (race-condition safe)
       const { data: deductResult, error: rpcErr } = await supabase.rpc('deduct_stock', {
-        p_product_id:   selectedProduct.id,
-        p_quantity:     quantity,
-        p_channel:      channel.toUpperCase(),   // e.g. 'AMAZON'
+        p_product_id: selectedProduct.id,
+        p_quantity: quantity,
+        p_channel: channel.toUpperCase(),   // e.g. 'INSTAGRAM', 'WHATSAPP'
         p_reference_id: `${channel}-manual`,
         p_performed_by: user?.id ?? null,
       })
 
       if (rpcErr) {
-        // Stock deduction failed — log warning but don't block the sale record
         console.warn('Stock deduction warning:', rpcErr.message)
         toast.success(`Sale logged for ${CHANNEL_MAP[channel]?.label}!`)
-        toast(`⚠ Stock deduction may need manual adjustment: ${rpcErr.message}`, { icon: '⚠️' })
+        toast(`⚠ Stock deduction: ${rpcErr.message}`, { icon: '⚠️' })
       } else if (!deductResult?.success) {
         toast.success(`Sale logged for ${CHANNEL_MAP[channel]?.label}!`)
         toast(`⚠ Stock: ${deductResult?.error || 'Check inventory manually'}`, { icon: '⚠️' })
@@ -129,18 +209,13 @@ const LogSaleForm = ({ onSaved }) => {
         }
       }
 
-      // Note: inventory_movements.channel is set automatically by deduct_stock() RPC
-      // which uses movement_type ONLINE_SALE. The channel column will be updated when
-      // the deduct_stock() function is extended to accept a channel param in a future
-      // migration. For now, the online_sales table records the channel accurately.
-
       // Reset form
       setSelectedProduct(null)
       setProductQuery('')
       setQuantity(1)
       setUnitPrice('')
       setCustomerName('')
-      setNotes('')
+      setCustomerPhone('')
       setSaleDate(new Date().toISOString().slice(0, 10))
       onSaved()
     } catch (err) {
@@ -150,14 +225,14 @@ const LogSaleForm = ({ onSaved }) => {
     }
   }
 
-  const cfg = CHANNEL_MAP[channel]
+  const cfg = CHANNEL_MAP[channel] || CHANNEL_MAP.instagram
 
   return (
     <div className="card">
       <div className="card-header">
         <span className="card-title">Log a Manual Channel Sale</span>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          For Amazon, Flipkart, Instagram, WhatsApp, or Other
+          For Instagram, WhatsApp, or Other
         </span>
       </div>
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -169,6 +244,7 @@ const LogSaleForm = ({ onSaved }) => {
             {CHANNELS.map(ch => (
               <button
                 key={ch.id}
+                type="button"
                 onClick={() => setChannel(ch.id)}
                 style={{
                   padding: '7px 14px',
@@ -191,58 +267,118 @@ const LogSaleForm = ({ onSaved }) => {
         </div>
 
         {/* Product search */}
-        <div className="form-group" style={{ marginBottom: 0, position: 'relative' }}>
+        <div ref={searchContainerRef} className="form-group" style={{ marginBottom: 0, position: 'relative' }}>
           <label className="form-label">Product <span className="required">*</span></label>
           <div style={{ position: 'relative' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
             <input
               className="form-input"
-              style={{ paddingLeft: 34 }}
-              placeholder="Search product name, ID or model..."
+              style={{ paddingLeft: 34, paddingRight: selectedProduct ? 30 : 12 }}
+              placeholder="Type product name, ID, or model..."
               value={productQuery}
-              onChange={e => { setProductQuery(e.target.value); setSelectedProduct(null) }}
+              onChange={e => {
+                setProductQuery(e.target.value)
+                if (selectedProduct) setSelectedProduct(null)
+              }}
+              onFocus={handleInputFocus}
+              autoComplete="off"
             />
-            {searching && <div className="spinner-sm" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)' }} />}
+            {searching ? (
+              <div className="spinner-sm" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)' }} />
+            ) : selectedProduct ? (
+              <button
+                type="button"
+                onClick={clearSelectedProduct}
+                style={{
+                  position: 'absolute',
+                  right: 8,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                  padding: 2,
+                }}
+                title="Clear selected product"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
           </div>
+
+          {/* Search Results Dropdown */}
           {productResults.length > 0 && (
             <div style={{
-              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
               background: 'white', border: '1.5px solid var(--border-strong)',
               borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-xl)',
-              maxHeight: 260, overflowY: 'auto', marginTop: 4,
+              maxHeight: 280, overflowY: 'auto', marginTop: 4,
             }}>
-              {productResults.map(p => (
-                <div
-                  key={p.id}
-                  onClick={() => selectProduct(p)}
-                  style={{
-                    padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    fontSize: 13,
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'white'}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{p.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                      <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>{p.product_id}</code>
-                      {p.mobile_model && <span style={{ marginLeft: 6 }}>{p.mobile_model}</span>}
+              {productResults.map(p => {
+                const displayName = getFormattedProductName(p) || p.name
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => selectProduct(p)}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      fontSize: 13,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                  >
+                    <div style={{ minWidth: 0, flex: 1, marginRight: 10 }}>
+                      <div style={{ fontWeight: 600, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {displayName}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>{p.product_id}</code>
+                        {p.mobile_model && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{p.mobile_model}</span>}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontWeight: 700 }}>{INR(p.selling_price)}</div>
+                      <div style={{ fontSize: 11, color: p.current_stock <= 5 ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
+                        {p.current_stock} in stock
+                      </div>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontWeight: 700 }}>{INR(p.selling_price)}</div>
-                    <div style={{ fontSize: 11, color: p.current_stock <= 5 ? 'var(--warning)' : 'var(--success)' }}>
-                      {p.current_stock} in stock
-                    </div>
-                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Selected Product Confirmation Chip */}
+          {selectedProduct && (
+            <div style={{
+              marginTop: 6,
+              padding: '8px 12px',
+              background: '#f0fdf4',
+              border: '1px solid #bbf7d0',
+              borderRadius: 'var(--radius)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: 12,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <CheckCircle2 size={15} color="#16a34a" style={{ flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ fontWeight: 700, color: '#166534' }}>
+                    {getFormattedProductName(selectedProduct) || selectedProduct.name}
+                  </span>
+                  <span style={{ color: '#6b7280', marginLeft: 6 }}>
+                    ({selectedProduct.product_id} · {selectedProduct.current_stock} in stock)
+                  </span>
                 </div>
-              ))}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Quantity + Price */}
+        {/* Quantity + Unit Price */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label">Quantity <span className="required">*</span></label>
@@ -269,7 +405,7 @@ const LogSaleForm = ({ onSaved }) => {
         {totalAmount > 0 && (
           <div style={{
             background: cfg?.bg || '#f9fafb',
-            border: `1px solid ${cfg?.color || 'var(--border)'}22`,
+            border: `1px solid ${cfg?.color || 'var(--border)'}33`,
             borderRadius: 'var(--radius)', padding: '10px 14px',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
@@ -278,10 +414,10 @@ const LogSaleForm = ({ onSaved }) => {
           </div>
         )}
 
-        {/* Customer + Date */}
+        {/* Customer Name + Mobile Number */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Customer Name (optional)</label>
+            <label className="form-label">Customer Name</label>
             <input
               className="form-input"
               placeholder="e.g. Rajan Kumar"
@@ -290,29 +426,30 @@ const LogSaleForm = ({ onSaved }) => {
             />
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Sale Date</label>
+            <label className="form-label">Mobile Number</label>
             <input
-              type="date"
+              type="tel"
               className="form-input"
-              value={saleDate}
-              onChange={e => setSaleDate(e.target.value)}
+              placeholder="e.g. +91 98765 43210"
+              value={customerPhone}
+              onChange={e => setCustomerPhone(e.target.value)}
             />
           </div>
         </div>
 
-        {/* Notes */}
+        {/* Sale Date */}
         <div className="form-group" style={{ marginBottom: 0 }}>
-          <label className="form-label">Notes (optional)</label>
-          <textarea
-            className="form-textarea"
-            rows={2}
-            placeholder="Order ID, tracking number, remarks..."
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
+          <label className="form-label">Sale Date</label>
+          <input
+            type="date"
+            className="form-input"
+            value={saleDate}
+            onChange={e => setSaleDate(e.target.value)}
           />
         </div>
 
         <button
+          type="button"
           className="btn btn-primary"
           style={{ justifyContent: 'center' }}
           onClick={handleSave}
@@ -341,7 +478,7 @@ const OnlineSales = () => {
     setLoading(true)
     let q = supabase
       .from('online_sales')
-      .select('*, products(name, product_id, mobile_model)')
+      .select('*, products(name, product_id, mobile_model, color_variants)')
       .order('created_at', { ascending: false })
       .limit(100)
 
@@ -393,9 +530,9 @@ const OnlineSales = () => {
               <ShoppingBag size={18} color="white" />
             </div>
             <div>
-              <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Online Sales Log</h1>
+              <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Manual Sales Log</h1>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                Manual entries for Amazon, Flipkart, Instagram, WhatsApp & Other
+                Manual entries for Instagram, WhatsApp
               </p>
             </div>
           </div>
@@ -469,7 +606,7 @@ const OnlineSales = () => {
           ) : sales.length === 0 ? (
             <div className="empty-state" style={{ padding: '60px 0' }}>
               <div className="empty-state-icon"><ShoppingBag size={26} /></div>
-              <h3>No {channelFilter !== 'ALL' ? CHANNEL_MAP[channelFilter]?.label : ''} Sales Logged</h3>
+              <h3>No {channelFilter !== 'ALL' ? (CHANNEL_MAP[channelFilter]?.label || channelFilter) : ''} Sales Logged</h3>
               <p>Use the form to log manual channel sales.</p>
             </div>
           ) : (
@@ -484,13 +621,15 @@ const OnlineSales = () => {
                     <th style={{ textAlign: 'right' }}>Unit Price</th>
                     <th style={{ textAlign: 'right' }}>Total</th>
                     <th>Customer</th>
-                    <th>Notes</th>
+                    <th>Mobile</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
                   {sales.map(s => {
                     const chCfg = CHANNEL_MAP[s.channel] || CHANNEL_MAP.other
+                    const prodName = getFormattedProductName(s.products) || s.products?.name || '—'
+                    const displayPhone = s.customer_phone || (s.notes?.startsWith('Phone: ') ? s.notes.replace('Phone: ', '') : s.notes) || '—'
                     return (
                       <tr key={s.id}>
                         <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
@@ -507,7 +646,7 @@ const OnlineSales = () => {
                         </td>
                         <td>
                           <div style={{ fontWeight: 600, fontSize: 13 }}>
-                            {s.products?.name || '—'}
+                            {prodName}
                           </div>
                           {s.products?.product_id && (
                             <code style={{ fontSize: 10, background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>
@@ -519,8 +658,8 @@ const OnlineSales = () => {
                         <td style={{ textAlign: 'right', fontSize: 13 }}>{INR(s.unit_price)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 800 }}>{INR(s.total_amount)}</td>
                         <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.customer_name || '—'}</td>
-                        <td style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {s.notes || '—'}
+                        <td style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                          {displayPhone}
                         </td>
                         <td>
                           <button
