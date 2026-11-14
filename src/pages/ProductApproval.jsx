@@ -92,6 +92,8 @@ const ProductApproval = () => {
           ...dbP,
           mah: dbP.mah || lp.mah || null,
           strap_mm: dbP.strap_mm || lp.strap_mm || null,
+          pin_type: dbP.pin_type || lp.pin_type || null,
+          cable_type: dbP.cable_type || lp.cable_type || null,
           mrp: dbP.mrp || lp.mrp || null,
           magsafe: dbP.magsafe != null ? dbP.magsafe : lp.magsafe,
         }
@@ -289,6 +291,8 @@ const ProductApproval = () => {
                       {p.mobile_model && ` · ${p.mobile_model}`}
                       {p.mah && ` · ${p.mah}`}
                       {p.strap_mm && ` · ${p.strap_mm.includes('mm') ? p.strap_mm : `${p.strap_mm}mm`}`}
+                      {p.pin_type && ` · ${p.pin_type}`}
+                      {p.cable_type && ` · ${p.cable_type}`}
                     </div>
                   </div>
 
@@ -436,6 +440,24 @@ const ProductApproval = () => {
                           Strap Size
                         </div>
                         <div>{p.strap_mm.includes('mm') ? p.strap_mm : `${p.strap_mm}mm`}</div>
+                      </div>
+                    )}
+
+                    {p.pin_type && (
+                      <div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                          Pin Type
+                        </div>
+                        <div>{p.pin_type}</div>
+                      </div>
+                    )}
+
+                    {p.cable_type && (
+                      <div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: 4 }}>
+                          Cable Type
+                        </div>
+                        <div>{p.cable_type}</div>
                       </div>
                     )}
 

@@ -167,6 +167,8 @@ const Products = () => {
           ...p,
           mah: p.mah || lp.mah || null,
           strap_mm: p.strap_mm || lp.strap_mm || null,
+          pin_type: p.pin_type || lp.pin_type || null,
+          cable_type: p.cable_type || lp.cable_type || null,
           mrp: p.mrp || lp.mrp || null,
           magsafe: p.magsafe != null ? p.magsafe : lp.magsafe,
         }
@@ -474,6 +476,36 @@ const Products = () => {
                                 alignItems: 'center',
                               }}>
                                 {p.strap_mm.includes('mm') ? p.strap_mm : `${p.strap_mm}mm`}
+                              </span>
+                            )}
+                            {p.pin_type && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                background: '#f5f3ff',
+                                color: '#6d28d9',
+                                border: '1px solid #ddd6fe',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}>
+                                {p.pin_type}
+                              </span>
+                            )}
+                            {p.cable_type && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                background: '#fdf2f8',
+                                color: '#be185d',
+                                border: '1px solid #fbcfe8',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}>
+                                {p.cable_type}
                               </span>
                             )}
                           </div>

@@ -115,6 +115,8 @@ const EditProduct = () => {
     magsafe: product.magsafe === true || product.magsafe === 'Yes' || product.magsafe === 'true',
     mah: product.mah || '',
     strap_mm: product.strap_mm || '',
+    pin_type: product.pin_type || '',
+    cable_type: product.cable_type || '',
     description: product.description || '',
     purchase_price: product.purchase_price?.toString() || '',
     mrp: getMrp(product)?.toString() || '',

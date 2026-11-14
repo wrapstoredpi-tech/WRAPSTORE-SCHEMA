@@ -80,6 +80,8 @@ const DEFAULT_GENERIC_COLORS = ['Black', 'White', 'Clear', 'Blue', 'Red', 'Purpl
 
 const MAH_OPTIONS = ['5000mah', '10000mah', '15000mah', '20000mah']
 const STRAP_MM_OPTIONS = ['38', '40', '41', '42', '44', '45', '46', '49']
+const PIN_TYPE_OPTIONS = ['Type C to C', 'Lightning Cable']
+const CABLE_TYPE_OPTIONS = ['Braided', 'Normal']
 
 const TARGET_COLOUR_SUBCATEGORIES = [
   'power bank',
@@ -146,6 +148,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     model: '',
     mah: '',
     strap_mm: '',
+    pin_type: '',
+    cable_type: '',
     images: [],
   })
 
@@ -196,6 +200,16 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       return
     }
 
+    if (isCable && !variantDraft.pin_type) {
+      toast.error('Please select Pin Type for this cable variant.')
+      return
+    }
+
+    if (isCable && !variantDraft.cable_type) {
+      toast.error('Please select Cable Type for this cable variant.')
+      return
+    }
+
     const temperedVariantName = `${temperedBorder} - ${temperedPrivacy}`
     const assignedColor = isTemperedGlass
       ? temperedVariantName
@@ -204,6 +218,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     const assignedModel = variantDraft.model || null
     const assignedMah = isPowerBank ? (variantDraft.mah || null) : null
     const assignedStrapMm = isWatchStrap ? (variantDraft.strap_mm || null) : null
+    const assignedPinType = isCable ? (variantDraft.pin_type || null) : null
+    const assignedCableType = isCable ? (variantDraft.cable_type || null) : null
 
     // Retain uploaded images so they persist across variants in a multi-variant batch
     const currentImgs = (variantDraft.images && variantDraft.images.length > 0)
@@ -217,21 +233,26 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         model: assignedModel || v.model || null,
         mah: assignedMah || v.mah || null,
         strap_mm: assignedStrapMm || v.strap_mm || null,
+        pin_type: assignedPinType || v.pin_type || null,
+        cable_type: assignedCableType || v.cable_type || null,
         images: currentImgs,
         id: editingVariantId,
       } : v))
       setEditingVariantId(null)
       toast.success('Product variant updated!')
     } else {
-      const defaultProdTitle = form.name && form.name.trim() ? form.name.trim() : (isTemperedGlass ? 'Tempered Glass' : (isWatchStrap ? 'Watch Strap' : 'Product'))
+      const defaultProdTitle = form.name && form.name.trim() ? form.name.trim() : (isTemperedGlass ? 'Tempered Glass' : (isWatchStrap ? 'Watch Strap' : (isCable ? 'Cable' : 'Product')))
       const strapSuffix = assignedStrapMm ? `${assignedStrapMm}mm` : null
-      const varSuffixes = [assignedColor, strapSuffix, assignedMah].filter(Boolean).join(' - ')
+      const cableSuffix = [assignedPinType, assignedCableType].filter(Boolean).join(' • ')
+      const varSuffixes = [assignedColor, strapSuffix, assignedMah, cableSuffix].filter(Boolean).join(' - ')
       const newVar = {
         ...variantDraft,
         color: assignedColor || null,
         model: assignedModel,
         mah: assignedMah,
         strap_mm: assignedStrapMm,
+        pin_type: assignedPinType,
+        cable_type: assignedCableType,
         images: currentImgs,
         purchase_price: '0',
         id: (productId || prefillData?.id) && variantsList.length === 0
@@ -259,6 +280,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       model: '',
       mah: '',
       strap_mm: '',
+      pin_type: '',
+      cable_type: '',
       images: currentImgs, // Keep image previews active for subsequent variants
     })
   }
@@ -272,6 +295,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       color: variant.color || variant.color_variants || '',
       mah: variant.mah || '',
       strap_mm: variant.strap_mm || '',
+      pin_type: variant.pin_type || '',
+      cable_type: variant.cable_type || '',
     })
     setSelectedModels(parseModels(rawModel))
     if (isTemperedGlass && variant.color) {
@@ -300,6 +325,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         model: '',
         mah: '',
         strap_mm: '',
+        pin_type: '',
+        cable_type: '',
         images: [],
       })
     }
@@ -384,6 +411,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     selectedSubcatName.toLowerCase().includes('watch strap') ||
     /watch\s*strap/i.test(form.name || '')
 
+  const isCable = /cable/i.test(selectedSubcatName) ||
+    selectedSubcatName.toLowerCase().includes('cable') ||
+    /cable/i.test(form.name || '')
+
   const shouldShowModelSelection = isMobileCase || isIpadCategory || isMobileAccessoryWithModels
 
   useEffect(() => {
@@ -457,6 +488,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           quantity: v.quantity?.toString() || '0',
           color: v.attributes?.color || v.variant_name,
           strap_mm: v.attributes?.strap_mm || prefillData.strap_mm || '',
+          pin_type: v.attributes?.pin_type || prefillData.pin_type || '',
+          cable_type: v.attributes?.cable_type || prefillData.cable_type || '',
           model: prefillData.mobile_model || '',
           mah: prefillData.mah || '',
           images: (v.accessory_variant_images || []).map(img => ({
@@ -480,6 +513,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           model: prefillData.mobile_model || '',
           mah: prefillData.mah || '',
           strap_mm: prefillData.strap_mm || '',
+          pin_type: prefillData.pin_type || '',
+          cable_type: prefillData.cable_type || '',
           images: (prefillData.product_images || [])
             .filter(img => (img.public_url || img.preview) && img.storage_path !== 'deleted')
             .map(img => ({
@@ -556,6 +591,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           model: prodData.mobile_model || '',
           mah: prodData.mah || '',
           strap_mm: prodData.strap_mm || '',
+          pin_type: prodData.pin_type || '',
+          cable_type: prodData.cable_type || '',
           images: mappedImages,
         }
 
@@ -627,6 +664,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           quantity: v.quantity?.toString() || '0',
           color: v.attributes?.color || v.variant_name,
           strap_mm: v.attributes?.strap_mm || accData.strap_mm || '',
+          pin_type: v.attributes?.pin_type || accData.pin_type || '',
+          cable_type: v.attributes?.cable_type || accData.cable_type || '',
           images: (v.accessory_variant_images || []).map(img => ({
             id: img.id,
             preview: img.image_url,
@@ -825,6 +864,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       const hasMissingStrapMm = effectiveVars.some(v => !v.strap_mm)
       if (hasMissingStrapMm) e.strap_mm = 'Select Strap mm for each watch strap variant'
     }
+    if (isCable) {
+      const hasMissingPinType = effectiveVars.some(v => !v.pin_type)
+      if (hasMissingPinType) e.pin_type = 'Select Pin Type for each cable variant'
+      const hasMissingCableType = effectiveVars.some(v => !v.cable_type)
+      if (hasMissingCableType) e.cable_type = 'Select Cable Type for each cable variant'
+    }
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -954,6 +999,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         // Assign strap_mm for THIS variant instance if it's a watch strap
         const variantStrapMm = v.strap_mm || (isWatchStrap ? variantDraft.strap_mm : null) || null
 
+        // Assign pin_type for THIS variant instance if it's a cable
+        const variantPinType = v.pin_type || (isCable ? variantDraft.pin_type : null) || null
+
+        // Assign cable_type for THIS variant instance if it's a cable
+        const variantCableType = v.cable_type || (isCable ? variantDraft.cable_type : null) || null
+
         const prodName = (targetId && v.name && v.name.trim()) ? v.name.trim() : (v.name && v.name.trim() ? v.name.trim() : generateProductName(v.name))
 
         const payload = {
@@ -966,8 +1017,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           color_variants: variantColor,
           mah: variantMah,
           strap_mm: variantStrapMm,
+          pin_type: variantPinType,
+          cable_type: variantCableType,
           collection: form.collection && form.collection.trim() ? form.collection.trim() : null,
-          magsafe: Boolean(form.magsafe),
+          magsafe: isCable ? false : Boolean(form.magsafe),
           description: v.description || form.description || null,
           purchase_price: 0,
           selling_price: sellingPrice,
@@ -1012,6 +1065,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           if (error.message?.includes('strap_mm') || error.code === 'PGRST204') {
             delete currentPayload.strap_mm
           }
+          if (error.message?.includes('pin_type') || error.code === 'PGRST204') {
+            delete currentPayload.pin_type
+          }
+          if (error.message?.includes('cable_type') || error.code === 'PGRST204') {
+            delete currentPayload.cable_type
+          }
           if (error.message?.includes('mrp') || error.code === 'PGRST204') {
             delete currentPayload.mrp
             if (mrpPrice > 0 && !currentPayload.description?.includes('MRP:')) {
@@ -1036,6 +1095,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
               ...currentPayload,
               mah: variantMah,
               strap_mm: variantStrapMm,
+              pin_type: variantPinType,
+              cable_type: variantCableType,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             }
@@ -1045,26 +1106,30 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           } else {
             data = retry.data
             productUuid = data?.id || `prod-local-${Date.now()}-${i}`
-            // Also cache locally with mah & strap_mm
+            // Also cache locally with mah, strap_mm, pin_type & cable_type
             saveLocalProduct({
               id: productUuid,
               product_id: data?.product_id || `WS-${Math.floor(100000 + Math.random() * 900000)}`,
               ...payload,
               mah: variantMah,
               strap_mm: variantStrapMm,
+              pin_type: variantPinType,
+              cable_type: variantCableType,
               created_at: data?.created_at || new Date().toISOString(),
               updated_at: data?.updated_at || new Date().toISOString(),
             })
           }
         } else {
           productUuid = data?.id || `prod-local-${Date.now()}-${i}`
-          // Cache locally with mah & strap_mm
+          // Cache locally with mah, strap_mm, pin_type & cable_type
           saveLocalProduct({
             id: productUuid,
             product_id: data?.product_id || `WS-${Math.floor(100000 + Math.random() * 900000)}`,
             ...payload,
             mah: variantMah,
             strap_mm: variantStrapMm,
+            pin_type: variantPinType,
+            cable_type: variantCableType,
             created_at: data?.created_at || new Date().toISOString(),
             updated_at: data?.updated_at || new Date().toISOString(),
           })
@@ -1423,10 +1488,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                   </div>
                 </div>
 
-                {/* Colour Variants, Model, mAh & Strap mm Row */}
+                {/* Colour Variants, Model, mAh, Strap mm & Cable Specs Row */}
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: ((shouldShowColourVariants || isTemperedGlass) && (shouldShowModelSelection || isPowerBank || isWatchStrap))
+                  gridTemplateColumns: ((shouldShowColourVariants || isTemperedGlass) && (shouldShowModelSelection || isPowerBank || isWatchStrap || isCable))
                     ? 'repeat(auto-fit, minmax(320px, 1fr))'
                     : '1fr',
                   gap: '24px',
@@ -2020,6 +2085,189 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                       </div>
                     </div>
                   )}
+
+                  {/* Pin Type & Cable Type Selection for Cables */}
+                  {isCable && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {/* 1. Pin Type Selection */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label className="form-label" style={{ marginBottom: 0 }}>
+                            Pin Type <span className="required">*</span>
+                          </label>
+                        </div>
+
+                        {/* Pin Type Dropdown */}
+                        <select
+                          className="form-select"
+                          id="cable-pin-type-select"
+                          value={variantDraft.pin_type || ''}
+                          onChange={e => setVariantDraft(prev => ({ ...prev, pin_type: e.target.value }))}
+                          style={{
+                            background: '#ffffff',
+                            fontSize: '13px',
+                            height: '38px',
+                            marginBottom: '8px',
+                            border: !variantDraft.pin_type && errors.pin_type ? '1.5px solid var(--danger)' : undefined,
+                          }}
+                        >
+                          <option value="">Select Pin Type...</option>
+                          {PIN_TYPE_OPTIONS.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+
+                        {/* Quick Select Pin Type Pills */}
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          background: '#fafafa',
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius)',
+                          border: '1px solid var(--border)',
+                        }}>
+                          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Pin Options:
+                          </span>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            {PIN_TYPE_OPTIONS.map(type => {
+                              const isSelected = variantDraft.pin_type === type
+                              return (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() => setVariantDraft(prev => ({ ...prev, pin_type: prev.pin_type === type ? '' : type }))}
+                                  style={{
+                                    fontSize: '12px',
+                                    padding: '5px 12px',
+                                    borderRadius: 'var(--radius-full)',
+                                    border: isSelected ? '1.5px solid #111827' : '1px solid #d1d5db',
+                                    background: isSelected ? '#111827' : '#ffffff',
+                                    color: isSelected ? '#ffffff' : '#374151',
+                                    fontWeight: isSelected ? 700 : 500,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'all 0.15s ease',
+                                    boxShadow: isSelected ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
+                                  }}
+                                >
+                                  {isSelected && <span style={{ fontSize: '11px', fontWeight: 800 }}>✓</span>}
+                                  {type}
+                                </button>
+                              )
+                            })}
+                          </div>
+
+                          {/* Selected Pin Type preview */}
+                          {variantDraft.pin_type && (
+                            <div style={{
+                              marginTop: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              color: '#10b981',
+                            }}>
+                              <span>✓ {variantDraft.pin_type}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 2. Cable Type Selection */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label className="form-label" style={{ marginBottom: 0 }}>
+                            Cable Type <span className="required">*</span>
+                          </label>
+                        </div>
+
+                        {/* Cable Type Dropdown */}
+                        <select
+                          className="form-select"
+                          id="cable-type-select"
+                          value={variantDraft.cable_type || ''}
+                          onChange={e => setVariantDraft(prev => ({ ...prev, cable_type: e.target.value }))}
+                          style={{
+                            background: '#ffffff',
+                            fontSize: '13px',
+                            height: '38px',
+                            marginBottom: '8px',
+                            border: !variantDraft.cable_type && errors.cable_type ? '1.5px solid var(--danger)' : undefined,
+                          }}
+                        >
+                          <option value="">Select Cable Type...</option>
+                          {CABLE_TYPE_OPTIONS.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+
+                        {/* Quick Select Cable Type Pills */}
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          background: '#fafafa',
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius)',
+                          border: '1px solid var(--border)',
+                        }}>
+                          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Cable Material / Form:
+                          </span>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            {CABLE_TYPE_OPTIONS.map(type => {
+                              const isSelected = variantDraft.cable_type === type
+                              return (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() => setVariantDraft(prev => ({ ...prev, cable_type: prev.cable_type === type ? '' : type }))}
+                                  style={{
+                                    fontSize: '12px',
+                                    padding: '5px 12px',
+                                    borderRadius: 'var(--radius-full)',
+                                    border: isSelected ? '1.5px solid #111827' : '1px solid #d1d5db',
+                                    background: isSelected ? '#111827' : '#ffffff',
+                                    color: isSelected ? '#ffffff' : '#374151',
+                                    fontWeight: isSelected ? 700 : 500,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'all 0.15s ease',
+                                    boxShadow: isSelected ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
+                                  }}
+                                >
+                                  {isSelected && <span style={{ fontSize: '11px', fontWeight: 800 }}>✓</span>}
+                                  {type}
+                                </button>
+                              )
+                            })}
+                          </div>
+
+                          {/* Selected Cable Type preview */}
+                          {variantDraft.cable_type && (
+                            <div style={{
+                              marginTop: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              color: '#10b981',
+                            }}>
+                              <span>✓ {variantDraft.cable_type}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Collection & MagSafe Row */}
@@ -2041,73 +2289,75 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                     />
                   </div>
 
-                  {/* MagSafe Radio Options */}
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-                      <label className="form-label" style={{ marginBottom: 0 }}>
-                        MagSafe
-                      </label>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px', height: '38px' }}>
-                      <label
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          color: 'var(--text-primary)',
-                          userSelect: 'none',
-                        }}
-                      >
-                        <input
-                          type="radio"
-                          name="magsafe"
-                          value="Yes"
-                          checked={form.magsafe === true}
-                          onChange={() => setForm(prev => ({ ...prev, magsafe: true }))}
+                  {/* MagSafe Radio Options (Hidden for Cables) */}
+                  {!isCable && (
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                        <label className="form-label" style={{ marginBottom: 0 }}>
+                          MagSafe
+                        </label>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', height: '38px' }}>
+                        <label
                           style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '8px',
                             cursor: 'pointer',
-                            accentColor: 'var(--brand-black, #111827)',
-                            width: '16px',
-                            height: '16px',
-                            margin: 0,
+                            fontSize: '14px',
+                            fontWeight: 500,
+                            color: 'var(--text-primary)',
+                            userSelect: 'none',
                           }}
-                        />
-                        <span>Yes</span>
-                      </label>
+                        >
+                          <input
+                            type="radio"
+                            name="magsafe"
+                            value="Yes"
+                            checked={form.magsafe === true}
+                            onChange={() => setForm(prev => ({ ...prev, magsafe: true }))}
+                            style={{
+                              cursor: 'pointer',
+                              accentColor: 'var(--brand-black, #111827)',
+                              width: '16px',
+                              height: '16px',
+                              margin: 0,
+                            }}
+                          />
+                          <span>Yes</span>
+                        </label>
 
-                      <label
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          color: 'var(--text-primary)',
-                          userSelect: 'none',
-                        }}
-                      >
-                        <input
-                          type="radio"
-                          name="magsafe"
-                          value="No"
-                          checked={form.magsafe === false}
-                          onChange={() => setForm(prev => ({ ...prev, magsafe: false }))}
+                        <label
                           style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '8px',
                             cursor: 'pointer',
-                            accentColor: 'var(--brand-black, #111827)',
-                            width: '16px',
-                            height: '16px',
-                            margin: 0,
+                            fontSize: '14px',
+                            fontWeight: 500,
+                            color: 'var(--text-primary)',
+                            userSelect: 'none',
                           }}
-                        />
-                        <span>No</span>
-                      </label>
+                        >
+                          <input
+                            type="radio"
+                            name="magsafe"
+                            value="No"
+                            checked={form.magsafe === false}
+                            onChange={() => setForm(prev => ({ ...prev, magsafe: false }))}
+                            style={{
+                              cursor: 'pointer',
+                              accentColor: 'var(--brand-black, #111827)',
+                              width: '16px',
+                              height: '16px',
+                              margin: 0,
+                            }}
+                          />
+                          <span>No</span>
+                        </label>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Product Details Section Heading */}
@@ -2251,6 +2501,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                         {isWatchStrap && (
                           <th style={{ padding: '12px 14px' }}>Strap mm</th>
                         )}
+                        {isCable && (
+                          <>
+                            <th style={{ padding: '12px 14px' }}>Pin Type</th>
+                            <th style={{ padding: '12px 14px' }}>Cable Type</th>
+                          </>
+                        )}
                         <th style={{ padding: '12px 14px' }}>MRP</th>
                         <th style={{ padding: '12px 14px' }}>Selling Price</th>
                         <th style={{ padding: '12px 14px' }}>Quantity</th>
@@ -2260,7 +2516,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                     <tbody>
                       {variantsList.length === 0 ? (
                         <tr>
-                          <td colSpan={5 + ((shouldShowColourVariants || isTemperedGlass) ? 1 : 0) + (shouldShowModelSelection ? 1 : 0) + (isPowerBank ? 1 : 0) + (isWatchStrap ? 1 : 0) + 1} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                          <td colSpan={5 + ((shouldShowColourVariants || isTemperedGlass) ? 1 : 0) + (shouldShowModelSelection ? 1 : 0) + (isPowerBank ? 1 : 0) + (isWatchStrap ? 1 : 0) + (isCable ? 2 : 0) + 1} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
                             No product variants added yet. Add a variant above to configure products.
                           </td>
                         </tr>
@@ -2323,6 +2579,20 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                                   {variant.strap_mm ? (variant.strap_mm.includes('mm') ? variant.strap_mm : `${variant.strap_mm} mm`) : '—'}
                                 </span>
                               </td>
+                            )}
+                            {isCable && (
+                              <>
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                                  <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', background: '#f5f3ff', color: '#6d28d9', fontWeight: 700, border: '1px solid #ddd6fe' }}>
+                                    {variant.pin_type || '—'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                                  <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', background: '#fdf2f8', color: '#be185d', fontWeight: 700, border: '1px solid #fbcfe8' }}>
+                                    {variant.cable_type || '—'}
+                                  </span>
+                                </td>
+                              </>
                             )}
                             <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
                               ₹{Number(variant.mrp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
