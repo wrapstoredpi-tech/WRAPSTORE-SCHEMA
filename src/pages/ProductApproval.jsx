@@ -223,7 +223,10 @@ const ProductApproval = () => {
   }
 
   const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }))
-  const getPrimaryImage = (images) => images?.find(i => i.is_primary)?.public_url || images?.[0]?.public_url || null
+  const getPrimaryImage = (images) => {
+    const valid = (images || []).filter(i => i && i.public_url && i.public_url.trim() && i.storage_path !== 'deleted')
+    return valid.find(i => i.is_primary)?.public_url || valid[0]?.public_url || null
+  }
 
   if (loading) {
     return <div className="loading-overlay"><div className="spinner" /></div>

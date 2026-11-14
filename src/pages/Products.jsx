@@ -296,8 +296,10 @@ const Products = () => {
     return { label: 'IN STOCK', class: 'badge-success' }
   }
 
-  const getPrimaryImage = (images) =>
-    images?.find(i => i.is_primary)?.public_url || images?.[0]?.public_url || null
+  const getPrimaryImage = (images) => {
+    const valid = (images || []).filter(i => i && i.public_url && i.public_url.trim() && i.storage_path !== 'deleted')
+    return valid.find(i => i.is_primary)?.public_url || valid[0]?.public_url || null
+  }
 
   return (
     <div>
@@ -395,7 +397,13 @@ const Products = () => {
                     return (
                       <tr key={p.id}>
                         <td>
-                          <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={displayName} alt={displayName} size={40} />
+                          <ProductImageHover
+                            src={imgUrl}
+                            images={(p.product_images || p.images || []).filter(i => i && (i.public_url || typeof i === 'string') && i.storage_path !== 'deleted')}
+                            title={displayName}
+                            alt={displayName}
+                            size={40}
+                          />
                         </td>
                         <td>
                           <code style={{ fontSize: '11px', background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>

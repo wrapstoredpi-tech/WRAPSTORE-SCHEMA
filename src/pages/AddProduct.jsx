@@ -120,6 +120,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
   const [categories, setCategories] = useState([])
   const [subcategories, setSubcategories] = useState([])
   const [images, setImages] = useState([]) // Array of { file, preview, isPrimary, id }
+  const [deletedImageIds, setDeletedImageIds] = useState([]) // Tracks IDs of existing images deleted by admin
   const [uploadingImages, setUploadingImages] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -168,6 +169,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       images: (prev.images || []).filter(img => img.id !== id)
     }))
     setImages(prev => (prev || []).filter(img => img.id !== id))
+    if (id && !String(id).startsWith('vimg-')) {
+      setDeletedImageIds(prev => Array.from(new Set([...prev, id])))
+    }
   }
 
   const handleAddOrUpdateVariant = () => {
@@ -476,11 +480,13 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           model: prefillData.mobile_model || '',
           mah: prefillData.mah || '',
           strap_mm: prefillData.strap_mm || '',
-          images: (prefillData.product_images || []).map(img => ({
-            id: img.id,
-            preview: img.public_url || img.preview,
-            existing: true,
-          })),
+          images: (prefillData.product_images || [])
+            .filter(img => (img.public_url || img.preview) && img.storage_path !== 'deleted')
+            .map(img => ({
+              id: img.id,
+              preview: img.public_url || img.preview,
+              existing: true,
+            })),
         }
 
         setVariantDraft({ ...initialVariant })
@@ -527,12 +533,14 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         setSelectedModels(parseModels(prodData.mobile_model))
         setSelectedColors(colors)
 
-        const mappedImages = (prodData.product_images || []).map(img => ({
-          id: img.id,
-          preview: img.public_url,
-          isPrimary: img.is_primary,
-          existing: true,
-        }))
+        const mappedImages = (prodData.product_images || [])
+          .filter(img => img.public_url && img.public_url.trim() && img.storage_path !== 'deleted')
+          .map(img => ({
+            id: img.id,
+            preview: img.public_url,
+            isPrimary: img.is_primary,
+            existing: true,
+          }))
 
         if (mappedImages.length) setImages(mappedImages)
 
@@ -553,6 +561,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
         setVariantDraft({ ...initialVariant })
         setVariantsList([])
+        setDeletedImageIds([])
         setIsLoading(false)
         return
       }
@@ -1080,39 +1089,109 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         }
 
         // Upload images for this product variant
-        const targetImgs = (v.images && v.images.length > 0) ? v.images : masterFallbackImages
-        if (targetImgs && targetImgs.length > 0 && productUuid) {
+        const targetImgs = targetId
+          ? (v.images !== undefined ? v.images : (variantDraft.images || []))
+          : ((v.images && v.images.length > 0) ? v.images : masterFallbackImages)
+
+        if (productUuid) {
           setUploadingImages(true)
 
-          // If updating an existing product, clean up removed image rows if any were deleted
+          // 1. If updating an existing product (targetId), handle deletions, primary assignment, and uploads
           if (targetId) {
-            const keepImageIds = targetImgs.filter(img => img.existing && img.id).map(img => img.id)
-            const keepUrls = targetImgs.filter(img => img.existing && img.preview).map(img => img.preview)
+            const keepImageIds = (targetImgs || []).filter(img => img.existing && img.id).map(img => String(img.id))
+            const keepUrls = (targetImgs || []).filter(img => img.existing && (img.preview || img.public_url)).map(img => img.preview || img.public_url)
 
-            const { data: existingDbImages } = await supabase.from('product_images').select('id, public_url').eq('product_id', productUuid)
-            if (existingDbImages && existingDbImages.length > 0) {
-              const toRemove = existingDbImages.filter(dbImg => !keepImageIds.includes(dbImg.id) && !keepUrls.includes(dbImg.public_url))
-              if (toRemove.length > 0) {
-                const removeIds = toRemove.map(r => r.id)
-                await supabase.from('product_images').delete().in('id', removeIds)
+            const { data: existingDbImages } = await supabase
+              .from('product_images')
+              .select('id, public_url, storage_path, is_primary')
+              .eq('product_id', productUuid)
+
+            const toRemove = (existingDbImages || []).filter(dbImg =>
+              deletedImageIds.includes(dbImg.id) ||
+              (!keepImageIds.includes(String(dbImg.id)) && !keepUrls.includes(dbImg.public_url))
+            )
+
+            if (toRemove.length > 0) {
+              const removeIds = toRemove.map(r => r.id)
+
+              // 1. Clean up physical files via Supabase Storage API first
+              const removePaths = toRemove.map(r => r.storage_path).filter(Boolean)
+              if (removePaths.length > 0) {
+                try {
+                  await supabase.storage.from('product-images').remove(removePaths)
+                } catch (sErr) {
+                  console.warn('Storage image removal note:', sErr)
+                }
+              }
+
+              // 2. Delete rows from product_images table
+              const { error: delErr } = await supabase.from('product_images').delete().in('id', removeIds)
+              if (delErr) {
+                console.warn('Direct product_images row deletion note:', delErr.message)
+                // If a legacy DB trigger blocks direct row deletion with "Direct deletion from storage tables",
+                // gracefully deactivate the image in the DB so it is completely unlinked and never loaded
+                await supabase.from('product_images').update({
+                  public_url: null,
+                  storage_path: 'deleted',
+                  is_primary: false,
+                }).in('id', removeIds)
               }
             }
-          }
 
-          // Upload newly added images (deduplicated across the batch) and generate DB image records
-          const newImageRecords = await uploadImages(productUuid, targetImgs, batchUploadCache, Boolean(targetId))
-          if (newImageRecords.length > 0) {
-            const { error: insertImgErr } = await supabase.from('product_images').insert(newImageRecords)
-            if (insertImgErr) {
-              console.warn('Failed to insert product_images rows:', insertImgErr.message)
+            // Determine surviving images in DB
+            const remainingDbImages = (existingDbImages || []).filter(dbImg => !toRemove.some(r => r.id === dbImg.id))
+
+            // Upload any newly added image files or URLs
+            const newImagesToUpload = (targetImgs || []).filter(img => !img.existing)
+            let newImageRecords = []
+            if (newImagesToUpload.length > 0) {
+              newImageRecords = await uploadImages(productUuid, newImagesToUpload, batchUploadCache, false)
+              if (newImageRecords.length > 0) {
+                // If there are no existing primary images, make the first new image primary
+                if (remainingDbImages.length === 0 && newImageRecords[0]) {
+                  newImageRecords[0].is_primary = true
+                }
+                const { error: insertImgErr } = await supabase.from('product_images').insert(newImageRecords)
+                if (insertImgErr) {
+                  console.error('Failed to insert product_images rows:', insertImgErr)
+                  toast.error(`Database error adding image: ${insertImgErr.message}`)
+                }
+              }
             }
-            // Attach to local product record if local fallback was used
-            if (isLocalFallback) {
-              const localProds = getLocalProducts()
-              const idx = localProds.findIndex(p => p.id === productUuid)
-              if (idx !== -1) {
-                localProds[idx].product_images = [...(localProds[idx].product_images || []), ...newImageRecords]
-                localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(localProds))
+
+            // If primary image was removed and remaining images have no primary, set first remaining image as primary
+            if (remainingDbImages.length > 0 && !remainingDbImages.some(r => r.is_primary) && !newImageRecords.some(r => r.is_primary)) {
+              await supabase.from('product_images').update({ is_primary: true }).eq('id', remainingDbImages[0].id)
+            }
+
+            // Sync localStorage cache if used
+            const localProds = getLocalProducts()
+            const idx = localProds.findIndex(p => p.id === productUuid)
+            if (idx !== -1) {
+              localProds[idx].product_images = [
+                ...remainingDbImages,
+                ...newImageRecords
+              ]
+              localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(localProds))
+            }
+          } else {
+            // Creating a new product or variant
+            if (targetImgs && targetImgs.length > 0) {
+              const newImageRecords = await uploadImages(productUuid, targetImgs, batchUploadCache, false)
+              if (newImageRecords.length > 0) {
+                const { error: insertImgErr } = await supabase.from('product_images').insert(newImageRecords)
+                if (insertImgErr) {
+                  console.error('Failed to insert product_images rows:', insertImgErr)
+                  toast.error(`Image upload failed: ${insertImgErr.message}`)
+                }
+                if (isLocalFallback) {
+                  const localProds = getLocalProducts()
+                  const idx = localProds.findIndex(p => p.id === productUuid)
+                  if (idx !== -1) {
+                    localProds[idx].product_images = [...(localProds[idx].product_images || []), ...newImageRecords]
+                    localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(localProds))
+                  }
+                }
               }
             }
           }

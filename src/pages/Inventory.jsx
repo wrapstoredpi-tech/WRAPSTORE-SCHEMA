@@ -491,8 +491,10 @@ const Inventory = () => {
     setPage(1)
   }
 
-  const getPrimaryImage = (images) =>
-    images?.find(i => i.is_primary)?.public_url || images?.[0]?.public_url || null
+  const getPrimaryImage = (images) => {
+    const valid = (images || []).filter(i => i && i.public_url && i.public_url.trim() && i.storage_path !== 'deleted')
+    return valid.find(i => i.is_primary)?.public_url || valid[0]?.public_url || null
+  }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
