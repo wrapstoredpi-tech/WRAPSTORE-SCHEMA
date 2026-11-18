@@ -165,6 +165,14 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       images: [...(prev.images || []), ...newImgs]
     }))
     setImages(prev => [...(prev || []), ...newImgs])
+
+    // Propagate to any variants already added to variantsList that have no images
+    setVariantsList(prev => prev.map(v => {
+      if (!v.images || v.images.length === 0) {
+        return { ...v, images: [...newImgs] }
+      }
+      return v
+    }))
   }
 
   const removeVariantImage = (id) => {
@@ -520,6 +528,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
             .map(img => ({
               id: img.id,
               preview: img.public_url || img.preview,
+              public_url: img.public_url || img.preview,
+              storage_path: img.storage_path || '',
+              isPrimary: img.is_primary,
               existing: true,
             })),
         }
@@ -573,6 +584,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           .map(img => ({
             id: img.id,
             preview: img.public_url,
+            public_url: img.public_url,
+            storage_path: img.storage_path || '',
             isPrimary: img.is_primary,
             existing: true,
           }))
@@ -818,11 +831,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           file_name: fileUploadInfo.file_name,
           file_size: fileUploadInfo.file_size,
         })
-      } else if (img.preview && typeof img.preview === 'string' && img.preview.startsWith('http')) {
+      } else if ((img.public_url && typeof img.public_url === 'string' && img.public_url.startsWith('http')) || (img.preview && typeof img.preview === 'string' && img.preview.startsWith('http'))) {
+        const finalUrl = (img.public_url && img.public_url.startsWith('http')) ? img.public_url : img.preview
         results.push({
           product_id: productUuid,
-          storage_path: img.storage_path || img.preview,
-          public_url: img.preview,
+          storage_path: img.storage_path || finalUrl,
+          public_url: finalUrl,
           is_primary: isPrimary,
           sort_order: i,
           file_name: img.file_name || 'image.png',
@@ -1179,11 +1193,23 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
             if (toRemove.length > 0) {
               const removeIds = toRemove.map(r => r.id)
 
-              // 1. Clean up physical files via Supabase Storage API first
+              // 1. Clean up physical files via Supabase Storage API safely
               const removePaths = toRemove.map(r => r.storage_path).filter(Boolean)
               if (removePaths.length > 0) {
                 try {
-                  await supabase.storage.from('product-images').remove(removePaths)
+                  // Only remove from storage if NO other product references the same storage_path
+                  const { data: sharedUsage } = await supabase
+                    .from('product_images')
+                    .select('storage_path')
+                    .in('storage_path', removePaths)
+                    .neq('product_id', productUuid)
+
+                  const sharedPathsSet = new Set((sharedUsage || []).map(r => r.storage_path))
+                  const safeToRemove = removePaths.filter(p => !sharedPathsSet.has(p))
+
+                  if (safeToRemove.length > 0) {
+                    await supabase.storage.from('product-images').remove(safeToRemove)
+                  }
                 } catch (sErr) {
                   console.warn('Storage image removal note:', sErr)
                 }

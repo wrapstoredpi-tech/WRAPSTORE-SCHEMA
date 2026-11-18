@@ -272,7 +272,7 @@ const ProductApproval = () => {
                 {/* Summary Row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px 20px' }}>
                   {/* Image with Hover & Multi-Image Gallery Preview */}
-                  <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={displayName} alt={displayName} size={56} />
+                  <ProductImageHover src={imgUrl} images={p.product_images || p.images} title={displayName} alt={displayName} size={56} product={p} />
 
                   {/* Info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -364,6 +364,7 @@ const ProductApproval = () => {
                                   images={p.product_images || p.images}
                                   title={`${p.name} - Image ${idx + 1}`}
                                   size={64}
+                                  product={p}
                                 />
                                 {isPrimary ? (
                                   <span style={{

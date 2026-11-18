@@ -229,7 +229,7 @@ const Products = () => {
         return
       }
 
-      // 1. Fetch storage_path for images (non-fatal if none or fails)
+      // 1. Fetch storage_path for images safely (ensure no sibling products share the file before deleting from bucket)
       try {
         const { data: imgRows } = await supabase
           .from('product_images')
@@ -238,7 +238,18 @@ const Products = () => {
 
         const storagePaths = (imgRows || []).map(r => r.storage_path).filter(Boolean)
         if (storagePaths.length > 0) {
-          await supabase.storage.from('product-images').remove(storagePaths)
+          const { data: sharedRows } = await supabase
+            .from('product_images')
+            .select('storage_path')
+            .in('storage_path', storagePaths)
+            .neq('product_id', deleteId)
+
+          const sharedPathsSet = new Set((sharedRows || []).map(r => r.storage_path))
+          const safeToRemove = storagePaths.filter(p => !sharedPathsSet.has(p))
+
+          if (safeToRemove.length > 0) {
+            await supabase.storage.from('product-images').remove(safeToRemove)
+          }
         }
       } catch (imgErr) {
         console.warn('Image storage cleanup note:', imgErr)
@@ -405,6 +416,7 @@ const Products = () => {
                             title={displayName}
                             alt={displayName}
                             size={40}
+                            product={p}
                           />
                         </td>
                         <td>

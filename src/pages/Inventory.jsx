@@ -619,7 +619,7 @@ const Inventory = () => {
                     return (
                       <tr key={p.id}>
                         <td>
-                          <ProductImageHover src={imgUrl} title={displayName} alt={displayName} size={40} />
+                          <ProductImageHover src={imgUrl} images={p.product_images} title={displayName} alt={displayName} size={40} product={p} />
                         </td>
                         <td>
                           <code style={{ fontSize: '11px', background: '#f3f4f6', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>

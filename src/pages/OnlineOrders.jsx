@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { updateCombosAfterProductStockChange } from '../lib/comboSync'
 import { printInvoicePDF } from '../lib/invoicePdf'
+import ProductImageHover from '../components/common/ProductImageHover'
 
 const INR = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const INR_SHORT = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })
@@ -267,8 +268,16 @@ const OnlineOrders = () => {
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
 
-  // Product Image lookup cache
+  // Product Image & Details lookup cache for hover preview & gallery
   const [productImages, setProductImages] = useState({})
+  const [productCodeImages, setProductCodeImages] = useState({})
+  const [productNameImages, setProductNameImages] = useState({})
+  const [productAllImages, setProductAllImages] = useState({})
+  const [productCodeAllImages, setProductCodeAllImages] = useState({})
+  const [productNameAllImages, setProductNameAllImages] = useState({})
+  const [productsMap, setProductsMap] = useState({})
+  const [productsByCode, setProductsByCode] = useState({})
+  const [productsByName, setProductsByName] = useState({})
 
   // Modals for Ship and Cancel actions
   const [shipModalOrder, setShipModalOrder] = useState(null)
@@ -283,16 +292,75 @@ const OnlineOrders = () => {
   const hasAutoSelectedRef = useRef(false)
   const syncedOrdersRef = useRef(new Set())
 
-  // Preload product images for reliable thumbnails
+  // Preload product details & all gallery images for rich hover & gallery modal
   useEffect(() => {
+    // 1. Fetch full product features (pin_type, cable_type, magsafe, mah, strap_mm, etc.)
     supabase
       .from('products')
-      .select('id, image_url')
-      .then(({ data }) => {
-        if (data) {
-          const map = {}
-          data.forEach(p => { if (p.image_url) map[p.id] = p.image_url })
-          setProductImages(map)
+      .select('*, categories(name), subcategories(name)')
+      .then(({ data: prods }) => {
+        if (prods) {
+          const byId = {}
+          const byCode = {}
+          const byName = {}
+          prods.forEach(p => {
+            if (p.id) byId[p.id] = p
+            if (p.product_id) byCode[p.product_id] = p
+            if (p.name) byName[p.name.trim().toLowerCase()] = p
+          })
+          setProductsMap(byId)
+          setProductsByCode(byCode)
+          setProductsByName(byName)
+        }
+      })
+      .catch(pErr => console.warn('Product details lookup note:', pErr))
+
+    // 2. Fetch all product images
+    supabase
+      .from('product_images')
+      .select('product_id, public_url, is_primary')
+      .order('is_primary', { ascending: false })
+      .then(async ({ data: imgData }) => {
+        if (imgData) {
+          const primaryMap = {}
+          const allMap = {}
+          imgData.forEach(img => {
+            if (img.product_id && img.public_url) {
+              if (!primaryMap[img.product_id]) primaryMap[img.product_id] = img.public_url
+              if (!allMap[img.product_id]) allMap[img.product_id] = []
+              allMap[img.product_id].push(img.public_url)
+            }
+          })
+          setProductImages(primaryMap)
+          setProductAllImages(allMap)
+
+          // Also map by product_id_code (e.g. WS-000273) and product name
+          try {
+            const { data: prodData } = await supabase.from('products').select('id, product_id, name')
+            if (prodData) {
+              const codeMap = {}
+              const codeAllMap = {}
+              const nameMap = {}
+              const nameAllMap = {}
+              prodData.forEach(p => {
+                if (p.product_id) {
+                  if (primaryMap[p.id]) codeMap[p.product_id] = primaryMap[p.id]
+                  if (allMap[p.id]) codeAllMap[p.product_id] = allMap[p.id]
+                }
+                if (p.name) {
+                  const key = p.name.trim().toLowerCase()
+                  if (primaryMap[p.id]) nameMap[key] = primaryMap[p.id]
+                  if (allMap[p.id]) nameAllMap[key] = allMap[p.id]
+                }
+              })
+              setProductCodeImages(codeMap)
+              setProductCodeAllImages(codeAllMap)
+              setProductNameImages(nameMap)
+              setProductNameAllImages(nameAllMap)
+            }
+          } catch (pErr) {
+            console.warn('Product code mapping note:', pErr)
+          }
         }
       })
       .catch(err => console.warn('Product images lookup note:', err))
@@ -375,6 +443,8 @@ const OnlineOrders = () => {
 
   // Realtime subscription on online_orders AND online_order_items
   useEffect(() => {
+    let t1 = null
+    let t2 = null
     const channel = supabase
       .channel('online-orders-live-sync-v4')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'online_orders' }, (payload) => {
@@ -386,6 +456,11 @@ const OnlineOrders = () => {
           )
         }
         fetchOrders(true)
+        // Follow up fetches in case items were written immediately following the order header
+        if (t1) clearTimeout(t1)
+        if (t2) clearTimeout(t2)
+        t1 = setTimeout(() => fetchOrders(true), 1000)
+        t2 = setTimeout(() => fetchOrders(true), 2500)
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'online_order_items' }, () => {
         fetchOrders(true)
@@ -393,6 +468,8 @@ const OnlineOrders = () => {
       .subscribe()
 
     return () => {
+      if (t1) clearTimeout(t1)
+      if (t2) clearTimeout(t2)
       supabase.removeChannel(channel)
     }
   }, [fetchOrders])
@@ -420,15 +497,63 @@ const OnlineOrders = () => {
       })
 
     return () => { active = false }
-  }, [selectedOrder?.id])
+  }, [selectedOrder?.id, selectedOrder?.online_order_items?.length])
 
   // Helper to resolve product thumbnail
   const getItemImage = useCallback((item) => {
     if (!item) return null
     if (item.image_url) return item.image_url
     if (item.product_id && productImages[item.product_id]) return productImages[item.product_id]
+    if (item.product_id_code && productCodeImages[item.product_id_code]) return productCodeImages[item.product_id_code]
+    const nameKey = (item.product_name || '').trim().toLowerCase()
+    if (nameKey && productNameImages[nameKey]) return productNameImages[nameKey]
     return null
-  }, [productImages])
+  }, [productImages, productCodeImages, productNameImages])
+
+  // Helper to resolve all gallery images for the item
+  const getItemAllImages = useCallback((item) => {
+    if (!item) return []
+    let list = []
+    if (item.product_id && productAllImages[item.product_id]) {
+      list = productAllImages[item.product_id]
+    } else if (item.product_id_code && productCodeAllImages[item.product_id_code]) {
+      list = productCodeAllImages[item.product_id_code]
+    } else if (item.product_name) {
+      const nameKey = item.product_name.trim().toLowerCase()
+      if (productNameAllImages[nameKey]) {
+        list = productNameAllImages[nameKey]
+      }
+    }
+    if (list.length === 0) {
+      const single = getItemImage(item)
+      if (single) list = [single]
+    }
+    return list
+  }, [productAllImages, productCodeAllImages, productNameAllImages, getItemImage])
+
+  // Helper to resolve product features / specs for hover card & modal
+  const getItemProduct = useCallback((item) => {
+    if (!item) return null
+    const nameKey = (item.product_name || '').trim().toLowerCase()
+    const baseProd = (item.product_id && productsMap[item.product_id])
+      || (item.product_id_code && productsByCode[item.product_id_code])
+      || (nameKey && productsByName[nameKey])
+      || null
+
+    return {
+      ...(baseProd || {}),
+      name: item.product_name || baseProd?.name,
+      product_id: item.product_id_code || baseProd?.product_id,
+      product_id_code: item.product_id_code || baseProd?.product_id,
+      mobile_brand: item.mobile_brand || baseProd?.mobile_brand,
+      mobile_model: item.mobile_model || baseProd?.mobile_model,
+      color: item.selected_color || item.color || baseProd?.color,
+      selling_price: item.unit_price || baseProd?.selling_price,
+      price: item.unit_price || baseProd?.selling_price,
+      ordered_qty: item.quantity,
+      line_total: item.line_total,
+    }
+  }, [productsMap, productsByCode, productsByName])
 
   // Status Tab Counts computed from loaded orders
   const statusCounts = useMemo(() => {
@@ -1510,7 +1635,14 @@ const OnlineOrders = () => {
                   {paginatedOrders.map((order, idx) => {
                     const isSelected = selectedOrderId === order.id
                     const isChecked = selectedOrderIds.has(order.id) || isSelected
-                    const items = order.online_order_items || []
+                    const rawItems = order.online_order_items || []
+                    const items = rawItems.length > 0
+                      ? rawItems
+                      : (order.notes ? [{
+                          product_name: order.notes,
+                          quantity: 1,
+                          line_total: order.subtotal || order.grand_total,
+                        }] : [])
                     const isDropup = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - 2
                     return (
                       <tr
@@ -1572,34 +1704,30 @@ const OnlineOrders = () => {
                         {/* Items Thumbnails */}
                         <td style={{ padding: '12px 14px' }}>
                           {items.length > 0 ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              {items.slice(0, 2).map((item, i) => {
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              {items.slice(0, 3).map((item, i) => {
                                 const img = getItemImage(item)
-                                return img ? (
-                                  <img
-                                    key={i}
-                                    src={img}
-                                    alt=""
-                                    style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover', border: '1px solid #e5e7eb' }}
-                                  />
-                                ) : (
+                                const allImgs = getItemAllImages(item)
+                                const prod = getItemProduct(item)
+                                return (
                                   <div
                                     key={i}
-                                    style={{
-                                      width: 28,
-                                      height: 28,
-                                      borderRadius: 6,
-                                      background: '#f3f4f6',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ display: 'inline-flex' }}
                                   >
-                                    <Package size={14} color="#9ca3af" />
+                                    <ProductImageHover
+                                      src={img}
+                                      images={allImgs.length > 0 ? allImgs : (img ? [img] : [])}
+                                      title={item.product_name || prod?.name || 'Product'}
+                                      alt={item.product_name || prod?.name || 'Product'}
+                                      size={32}
+                                      product={prod}
+                                      position="right"
+                                    />
                                   </div>
                                 )
                               })}
-                              {items.length > 2 && (
+                              {items.length > 3 && (
                                 <span style={{
                                   fontSize: 10,
                                   fontWeight: 700,
@@ -1608,7 +1736,7 @@ const OnlineOrders = () => {
                                   padding: '2px 5px',
                                   borderRadius: 4,
                                 }}>
-                                  +{items.length - 2}
+                                  +{items.length - 3}
                                 </span>
                               )}
                             </div>
@@ -1967,29 +2095,125 @@ const OnlineOrders = () => {
                 padding: '16px 20px',
                 borderBottom: '1px solid #f1f5f9',
               }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                  Items ({selectedOrder.online_order_items?.length || 1})
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+                  Items ({selectedOrder.online_order_items?.length || (selectedOrder.notes ? 1 : 1)})
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {(selectedOrder.online_order_items && selectedOrder.online_order_items.length > 0) ? (
                     selectedOrder.online_order_items.map((item, i) => {
                       const img = getItemImage(item)
+                      const allImgs = getItemAllImages(item)
+                      const prod = getItemProduct(item)
                       return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          {img ? (
-                            <img src={img} alt="" style={{ width: 38, height: 38, borderRadius: 6, objectFit: 'cover', border: '1px solid #e5e7eb' }} />
-                          ) : (
-                            <div style={{ width: 38, height: 38, borderRadius: 6, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                              <Package size={18} color="#9ca3af" />
-                            </div>
-                          )}
+                        <div
+                          key={i}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            padding: '6px 8px',
+                            borderRadius: 8,
+                            transition: 'background 0.15s ease',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <div style={{ flexShrink: 0 }}>
+                            <ProductImageHover
+                              src={img}
+                              images={allImgs.length > 0 ? allImgs : (img ? [img] : [])}
+                              title={item.product_name || prod?.name || 'Product'}
+                              alt={item.product_name || prod?.name || 'Product'}
+                              size={44}
+                              product={prod}
+                              position="left"
+                            />
+                          </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: '#111827',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={item.product_name}
+                            >
                               {item.product_name}
                             </div>
-                            <div style={{ fontSize: 11, color: '#64748b' }}>
-                              {item.mobile_model || 'Universal'}
-                              {item.selected_color ? ` · ${item.selected_color}` : ''}
+                            <div style={{ fontSize: 11, color: '#64748b', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                              {item.mobile_model && item.mobile_model.toLowerCase() !== 'universal' && (
+                                <span style={{
+                                  fontSize: 10,
+                                  fontWeight: 600,
+                                  color: '#2563eb',
+                                  background: '#eff6ff',
+                                  padding: '1px 6px',
+                                  borderRadius: 4,
+                                }}>
+                                  {item.mobile_model}
+                                </span>
+                              )}
+                              {item.product_id_code && (
+                                <span style={{ fontSize: 10, color: '#94a3b8' }}>
+                                  {item.product_id_code}
+                                </span>
+                              )}
+                              {item.selected_color && <span>· {item.selected_color}</span>}
+                              {prod?.pin_type && (
+                                <span style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  background: '#f5f3ff',
+                                  color: '#6d28d9',
+                                  border: '1px solid #ddd6fe',
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                }}>
+                                  {prod.pin_type}
+                                </span>
+                              )}
+                              {prod?.cable_type && (
+                                <span style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  background: '#fdf2f8',
+                                  color: '#be185d',
+                                  border: '1px solid #fbcfe8',
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                }}>
+                                  {prod.cable_type}
+                                </span>
+                              )}
+                              {prod?.magsafe && (
+                                <span style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  background: '#eff6ff',
+                                  color: '#1d4ed8',
+                                  border: '1px solid #bfdbfe',
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                }}>
+                                  ⚡ MagSafe
+                                </span>
+                              )}
+                              {prod?.mah && (
+                                <span style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  background: '#ecfdf5',
+                                  color: '#047857',
+                                  border: '1px solid #a7f3d0',
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                }}>
+                                  🔋 {prod.mah}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -2000,37 +2224,80 @@ const OnlineOrders = () => {
                       )
                     })
                   ) : (
-                    <div style={{
-                      padding: '10px 12px',
-                      background: '#f8fafc',
-                      borderRadius: 8,
-                      border: '1px solid #e2e8f0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                    }}>
-                      <div style={{
-                        width: 36, height: 36, borderRadius: 6,
-                        background: '#e0f2fe',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0,
-                      }}>
-                        <Package size={18} color="#0284c7" />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
-                          {selectedOrder.notes || 'Website Order Item'}
-                        </div>
-                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
-                          1 unit · Subtotal {INR(selectedOrder.subtotal || selectedOrder.grand_total)}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>
-                          {INR(selectedOrder.subtotal || selectedOrder.grand_total)}
-                        </div>
-                      </div>
-                    </div>
+                    (() => {
+                      const noteText = selectedOrder.notes?.trim()
+                      const parsedItems = []
+                      if (noteText) {
+                        const parts = noteText.split(',').map(s => s.trim()).filter(Boolean)
+                        for (const part of parts) {
+                          const match = part.match(/^(?:(\d+)x\s+)?([^(]+)(?:\(([^)]+)\))?$/)
+                          if (match) {
+                            parsedItems.push({
+                              product_name: (match[2] || part).trim(),
+                              quantity: parseInt(match[1], 10) || 1,
+                              mobile_model: match[3] ? match[3].trim() : null,
+                              line_total: selectedOrder.subtotal || selectedOrder.grand_total,
+                            })
+                          } else {
+                            parsedItems.push({
+                              product_name: part,
+                              quantity: 1,
+                              line_total: selectedOrder.subtotal || selectedOrder.grand_total,
+                            })
+                          }
+                        }
+                      }
+                      const itemsToRender = parsedItems.length > 0 ? parsedItems : [{
+                        product_name: selectedOrder.notes || 'Website Order Item',
+                        quantity: 1,
+                        line_total: selectedOrder.subtotal || selectedOrder.grand_total,
+                      }]
+
+                      return itemsToRender.map((fallbackItem, fIdx) => {
+                        const img = getItemImage(fallbackItem)
+                        const allImgs = getItemAllImages(fallbackItem)
+                        const prod = getItemProduct(fallbackItem)
+                        return (
+                          <div
+                            key={fIdx}
+                            style={{
+                              padding: '10px 12px',
+                              background: '#f8fafc',
+                              borderRadius: 8,
+                              border: '1px solid #e2e8f0',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 12,
+                            }}
+                          >
+                            <div style={{ flexShrink: 0 }}>
+                              <ProductImageHover
+                                src={img}
+                                images={allImgs.length > 0 ? allImgs : (img ? [img] : [])}
+                                title={fallbackItem.product_name}
+                                alt={fallbackItem.product_name}
+                                size={40}
+                                product={prod}
+                                position="left"
+                              />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
+                                {fallbackItem.product_name}
+                              </div>
+                              <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
+                                {fallbackItem.quantity} unit · Subtotal {INR(fallbackItem.line_total)}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>
+                                {INR(fallbackItem.line_total)}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
+                    })()
                   )}
                 </div>
               </div>

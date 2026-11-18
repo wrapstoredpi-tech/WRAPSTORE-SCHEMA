@@ -1218,8 +1218,10 @@ tbody td {
   border: 1.5px solid var(--border-strong);
   border-radius: 12px;
   box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.25), 0 10px 15px -5px rgba(0, 0, 0, 0.1);
-  padding: 8px;
-  width: 260px;
+  padding: 10px;
+  width: 310px;
+  max-height: 85vh;
+  overflow-y: auto;
   transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1233,9 +1235,11 @@ tbody td {
   transform: translateY(-50%) scale(1);
 }
 
-.product-thumb-hover-preview img {
+.product-thumb-hover-preview img.main-preview-img,
+.product-thumb-hover-preview > img {
   width: 100%;
-  height: 240px;
+  height: 180px;
+  max-height: 180px;
   object-fit: contain;
   background: #f9fafb;
   border-radius: 8px;
@@ -1243,15 +1247,13 @@ tbody td {
 }
 
 .product-thumb-hover-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-top: 6px;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 4px;
+  margin-top: 8px;
+  text-align: left;
+  line-height: 1.35;
+  padding: 0 2px;
 }
 
 /* ---- STOCK STATUS ---- */
