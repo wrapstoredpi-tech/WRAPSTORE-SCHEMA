@@ -22,7 +22,7 @@ const Settings = () => {
   const [form, setForm] = useState({
     store_name: 'WRAPSTORE',
     address: 'Railway Station Rd, Dharmapuri, Tamil Nadu, India - 636701',
-    phone: '+91 81227 47947',
+    phone: '+91 63839 40534',
     gstin: '',
     invoice_prefix: 'WS',
     invoice_footer: 'Thank you for shopping at WrapStore!',

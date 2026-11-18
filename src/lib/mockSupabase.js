@@ -47,7 +47,7 @@ const INITIAL_STORE = {
     id: 'settings-001',
     store_name: 'WRAPSTORE',
     address: 'Railway Station Rd, Dharmapuri, Tamil Nadu, India - 636701',
-    phone: '+91 81227 47947',
+    phone: '+91 63839 40534',
     gstin: '',
     logo_url: '',
     invoice_prefix: 'WS',

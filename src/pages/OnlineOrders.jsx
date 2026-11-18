@@ -878,7 +878,7 @@ const OnlineOrders = () => {
         store: {
           store_name: 'WRAPSTORE',
           address: 'Railway Station Rd, Dharmapuri - 636701',
-          phone: '+91 81227 47947',
+          phone: '+91 63839 40534',
           gstin: '33ABCDE1234F1Z5',
           invoice_footer: 'Thank you for shopping at WrapStore!',
         },

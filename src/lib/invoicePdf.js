@@ -7,6 +7,7 @@
 import _jsPDF from 'jspdf'
 import _autoTable from 'jspdf-autotable'
 import { getFormattedProductName } from './productUtils.js'
+import { INVOICE_LOGO_BASE64 } from '../assets/invoice_logo_base64.js'
 
 const jsPDF = _jsPDF?.jsPDF || _jsPDF
 const autoTable = _autoTable?.default || _autoTable
@@ -81,15 +82,18 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
   let y = MARGIN_TOP + 1 // ~8.2 pt
 
   // ====================================================
-  // 1. HEADER (Typography: Store name 10pt/700, Tagline 6pt/400)
+  // 1. HEADER (Left: Brand Logo, Right: Store Address & GSTIN)
   // Target: ~15% of page height
   // ====================================================
   let logoRendered = false
-  if (logoUrl) {
+  const activeLogo = logoUrl || INVOICE_LOGO_BASE64
+
+  if (activeLogo) {
     try {
-      const b64 = await urlToBase64(logoUrl)
+      const b64 = activeLogo.startsWith('data:') ? activeLogo : await urlToBase64(activeLogo)
       if (b64) {
-        doc.addImage(b64, 'JPEG', MARGIN_LEFT, y + 1, 46, 17)
+        // Logo dimensions: 58 pt width, 18.5 pt height (aspect ratio ~3.13)
+        doc.addImage(b64, 'PNG', MARGIN_LEFT, y + 1, 58, 18.5)
         logoRendered = true
       }
     } catch {
@@ -98,56 +102,53 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
   }
 
   if (!logoRendered) {
-    // Dual-box WrapStore branding: [ WRAP ][ STORE ]
-    const boxH = 12
-    const boxW1 = 25
-    const boxW2 = 30
+    // Vector fallback matching user rectangular logo: [ WRAP ][ STORE ] inside outer rectangular frame
+    const outerW = 58
+    const outerH = 18.5
+    const innerMargin = 1.2
+    const innerW = (outerW - 2 * innerMargin) / 2
+    const innerH = outerH - 2 * innerMargin
 
-    // Left box: Navy filled
+    // Outer frame
+    doc.setDrawColor(...NAVY)
+    doc.setLineWidth(0.8)
+    doc.rect(MARGIN_LEFT, y + 1, outerW, outerH, 'D')
+
+    // Left block: solid black/navy
     doc.setFillColor(...NAVY)
-    doc.roundedRect(MARGIN_LEFT, y + 1, boxW1, boxH, 1.2, 1.2, 'F')
+    doc.rect(MARGIN_LEFT + innerMargin, y + 1 + innerMargin, innerW, innerH, 'F')
     doc.setTextColor(...WHITE)
     doc.setFontSize(8.5)
     doc.setFont('helvetica', 'bold')
-    doc.text('WRAP', MARGIN_LEFT + boxW1 / 2, y + 1 + boxH / 2 + 3, { align: 'center' })
+    doc.text('WRAP', MARGIN_LEFT + innerMargin + innerW / 2, y + 1 + innerMargin + innerH / 2 + 3, { align: 'center' })
 
-    // Right box: Navy outlined
-    doc.setDrawColor(...NAVY)
-    doc.setLineWidth(0.8)
-    doc.roundedRect(MARGIN_LEFT + boxW1, y + 1, boxW2, boxH, 1.2, 1.2, 'D')
+    // Right block: white background
     doc.setTextColor(...NAVY)
     doc.setFontSize(8.5)
     doc.setFont('helvetica', 'bold')
-    doc.text('STORE', MARGIN_LEFT + boxW1 + boxW2 / 2, y + 1 + boxH / 2 + 3, { align: 'center' })
-
-    // Tagline below logo
-    doc.setFontSize(6)
-    doc.setFont('helvetica', 'normal')
-    doc.setTextColor(...GRAY)
-    doc.text('PREMIUM CASES & SKINS', MARGIN_LEFT, y + 21)
+    doc.text('STORE', MARGIN_LEFT + innerMargin + innerW + innerW / 2, y + 1 + innerMargin + innerH / 2 + 3, { align: 'center' })
   }
 
-  // Right-aligned Store Information
+  // Right-aligned Store Information (Address & Contact only — "WRAPSTORE" text removed as requested)
   const storeX = PAGE_W - MARGIN_RIGHT
   const storeName = store?.store_name || 'WRAPSTORE'
   const storeAddress = store?.address || 'Railway Station Rd, Dharmapuri, Tamil Nadu, India - 636701'
-  const storePhone = store?.phone ? `Phone: ${store.phone}` : 'Phone: +91 81227 47947'
+  const storePhoneRaw = (store?.phone && store.phone !== '+91 81227 47947') ? store.phone : '+91 63839 40534'
+  const storePhone = storePhoneRaw.startsWith('Phone:') ? storePhoneRaw : `Phone: ${storePhoneRaw}`
   const storeGstin = store?.gstin ? `GSTIN: ${store.gstin}` : 'GSTIN: 33ABCDE1234F1Z5'
 
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(10) // Frozen spec: Store name 10pt 700
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(6.2)
   doc.setTextColor(...NAVY)
-  doc.text(storeName, storeX, y + 7.5, { align: 'right' })
+  doc.text(storeAddress, storeX, y + 8, { align: 'right' })
 
+  const metaLine = [storePhone, storeGstin].filter(Boolean).join(' · ')
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(5.8)
   doc.setTextColor(...GRAY)
-  doc.text(storeAddress, storeX, y + 15, { align: 'right' })
-  const metaLine = [storePhone, storeGstin].filter(Boolean).join(' · ')
-  doc.setFontSize(5.5)
-  doc.text(metaLine, storeX, y + 21.5, { align: 'right' })
+  doc.text(metaLine, storeX, y + 16.5, { align: 'right' })
 
-  y += 26
+  y += 24
 
   // Subtle horizontal divider below header
   doc.setDrawColor(...BORDER_COLOR)
@@ -212,7 +213,8 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
   doc.setTextColor(...NAVY)
   doc.text(invoice.customer_name || 'Walk-in Customer', col2X + 40, y + 5, { maxWidth: colWidth - 40 })
 
-  y += 10.5
+  // 10px vertical gap between Date row and Payment row
+  y += 18.5
 
   // Row 2: Payment Method & Status (Left) | Phone (Right)
   doc.setFont('helvetica', 'normal')
@@ -248,9 +250,7 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
     const metaParts = []
     const modelToDisplay = item.billed_model || item.mobile_model
     if (modelToDisplay) metaParts.push(`Model: ${modelToDisplay}`)
-    if (item.product_id_code) metaParts.push(`ID: ${item.product_id_code}`)
     if (item.discount_pct > 0) metaParts.push(`Disc: ${item.discount_pct}%`)
-    if (item.gst_pct > 0) metaParts.push(`GST: ${item.gst_pct}%`)
 
     const lines = [productName]
     if (metaParts.length > 0) lines.push(metaParts.join(' · '))
@@ -269,6 +269,9 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
     ]
   })
 
+  // Line spacing: add 5px (~4pt) vertical space between lines of wrapped text
+  doc.setLineHeightFactor(1.85)
+
   autoTable(doc, {
     startY: y,
     head: [['#', 'Product & Description', 'Qty', 'Price', 'Total']],
@@ -283,8 +286,8 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
       valign: 'middle',
     },
     bodyStyles: {
-      fontSize: 7.5, // Frozen spec: Table content 7.5pt 400
-      cellPadding: { top: 2.8, bottom: 2.8, left: 2, right: 2 },
+      fontSize: 6.0, // Reduced by 20% (from 7.5pt to 6.0pt) for compact, clean product names
+      cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
       textColor: NAVY,
       valign: 'middle',
       lineColor: BORDER_COLOR,
@@ -295,16 +298,20 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
     },
     columnStyles: {
       0: { cellWidth: 11.77, halign: 'center' },  // 5%
-      1: { cellWidth: 113.01 },                    // 48%
-      2: { cellWidth: 23.54, halign: 'center', fontStyle: 'bold' }, // 10%
-      3: { cellWidth: 40.02, halign: 'right', cellPadding: { top: 2.8, bottom: 2.8, left: 1, right: 1.5 } }, // 17%
-      4: { cellWidth: 47.09, halign: 'right', fontStyle: 'bold', cellPadding: { top: 2.8, bottom: 2.8, left: 1, right: 1.5 } }, // 20%
+      1: { cellWidth: 113.01, fontSize: 6.0 },    // Product & Description (reduced by 20%)
+      2: { cellWidth: 20.00, halign: 'center', fontStyle: 'bold', fontSize: 7.0 }, // ~8.5%
+      3: { cellWidth: 43.57, halign: 'right', fontSize: 7.0, cellPadding: { top: 2.5, bottom: 2.5, left: 1, right: 1.5 } }, // ~18.5%
+      4: { cellWidth: 47.09, halign: 'right', fontStyle: 'bold', fontSize: 7.0, cellPadding: { top: 2.5, bottom: 2.5, left: 1, right: 1.5 } }, // 20%
     },
     margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: 10, bottom: 10 },
     styles: { overflow: 'linebreak', font: 'helvetica' },
   })
 
-  y = doc.lastAutoTable.finalY + 4
+  // Restore default line height factor
+  doc.setLineHeightFactor(1.15)
+
+  // 20px (15pt) gap between Table and Financial Summary
+  y = doc.lastAutoTable.finalY + 15
 
   // ====================================================
   // 5. FINANCIAL SUMMARY (Two-Column Grid)
@@ -335,7 +342,7 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
   doc.setDrawColor(...BORDER_COLOR)
   doc.setLineWidth(0.4)
   doc.line(totalsX, y, PAGE_W - MARGIN_RIGHT, y)
-  y += 3
+  y += 4
 
   const totalsRows = [
     ['Subtotal', INR(invoice.subtotal)],
@@ -352,7 +359,8 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(8) // Frozen spec: Summary values 8pt 600
     doc.text(String(value), PAGE_W - MARGIN_RIGHT - 2, y + 4.5, { align: 'right' })
-    y += 6.5
+    // 20px gap (approx 15pt) line-to-line between Subtotal, Discount & GST
+    y += 12
   })
 
   // GRAND TOTAL Box
@@ -439,7 +447,8 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(6)
   doc.setTextColor(...GRAY)
-  doc.text(`Computer-generated invoice · No signature required · ${storeName}`, PAGE_W / 2, y + 10.5, { align: 'center' })
+  // Clean gap between "Thank you" and "Computer-generated invoice"
+  doc.text(`Computer-generated invoice · No signature required · ${storeName}`, PAGE_W / 2, y + 13, { align: 'center' })
 
   // Trigger print dialog if autoPrint requested
   if (autoPrint && typeof doc.autoPrint === 'function') {

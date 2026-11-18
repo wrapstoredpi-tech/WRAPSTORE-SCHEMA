@@ -128,7 +128,7 @@ const Login = () => {
         </div>
 
         <div className="login-footer">
-          WrapStore · Dharmapuri, Tamil Nadu · +91 81227 47947
+          WrapStore · Dharmapuri, Tamil Nadu · +91 63839 40534
         </div>
       </div>
     </div>
