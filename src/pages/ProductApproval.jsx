@@ -225,9 +225,31 @@ const ProductApproval = () => {
   }
 
   const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }))
-  const getPrimaryImage = (images) => {
-    const valid = (images || []).filter(i => i && i.public_url && i.public_url.trim() && i.storage_path !== 'deleted')
-    return valid.find(i => i.is_primary)?.public_url || valid[0]?.public_url || null
+  const getPrimaryImage = (p) => {
+    const images = p?.product_images || p?.images
+    const valid = (images || []).filter(i => i && (i.public_url || (typeof i === 'string' && i.startsWith('http')) || i.preview) && i.storage_path !== 'deleted')
+    if (valid.length > 0) {
+      return valid.find(i => i.is_primary)?.public_url || (typeof valid[0] === 'string' ? valid[0] : (valid[0]?.public_url || valid[0]?.preview)) || null
+    }
+
+    // Fallback: Check if another product in the pending list with same base name & same color has an image
+    if (p?.color_variants && products?.length > 0) {
+      const baseName = (p.name || '').split(' - ')[0].trim().toLowerCase()
+      const sameColorSibling = products.find(other =>
+        other.id !== p.id &&
+        other.color_variants === p.color_variants &&
+        (other.name || '').split(' - ')[0].trim().toLowerCase() === baseName &&
+        ((other.product_images && other.product_images.length > 0) || (other.images && other.images.length > 0))
+      )
+      if (sameColorSibling) {
+        const sibImgs = (sameColorSibling.product_images || sameColorSibling.images || []).filter(i => i && (i.public_url || (typeof i === 'string' && i.startsWith('http')) || i.preview) && i.storage_path !== 'deleted')
+        if (sibImgs.length > 0) {
+          return sibImgs.find(i => i.is_primary)?.public_url || (typeof sibImgs[0] === 'string' ? sibImgs[0] : (sibImgs[0]?.public_url || sibImgs[0]?.preview)) || null
+        }
+      }
+    }
+
+    return null
   }
 
   if (loading) {
@@ -263,7 +285,7 @@ const ProductApproval = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {products.map(p => {
             const isOpen = expanded[p.id]
-            const imgUrl = getPrimaryImage(p.product_images)
+            const imgUrl = getPrimaryImage(p)
             const isProcessing = processing === p.id
             const displayName = getFormattedProductName(p)
 

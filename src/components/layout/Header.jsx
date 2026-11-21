@@ -1,6 +1,6 @@
 import React from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Plus, Store, Sparkles, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Plus, Store, Sparkles, PanelLeftClose, PanelLeftOpen, ExternalLink } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 
 const PAGE_META = {
@@ -71,21 +71,53 @@ const Header = ({ isCollapsed = false, toggleSidebar }) => {
       </div>
 
       <div className="header-actions">
-        {/* Live Store Pill */}
+        {/* Visit Site & Date Pill */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: 8,
           background: '#f8fafc',
           border: '1px solid #e2e8f0',
-          padding: '5px 10px',
+          padding: '4px 10px',
           borderRadius: 'var(--radius-full)',
           fontSize: '11px',
           fontWeight: 600,
           color: '#475569',
         }}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 0 2px #d1fae5' }} />
-          <span>Dharmapuri Store</span>
+          <a
+            href="https://wrap-web-one.vercel.app/"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
+              padding: '2px 8px',
+              borderRadius: 'var(--radius-full)',
+              color: '#0f172a',
+              textDecoration: 'none',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '11px',
+              transition: 'all 0.15s ease',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = '#f1f5f9'
+              e.currentTarget.style.borderColor = '#94a3b8'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = '#ffffff'
+              e.currentTarget.style.borderColor = '#cbd5e1'
+            }}
+            title="Visit store: https://wrap-web-one.vercel.app/"
+          >
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 0 2px #d1fae5' }} />
+            <span>Visit Site</span>
+            <ExternalLink size={11} style={{ color: '#64748b' }} />
+          </a>
           <span style={{ color: '#cbd5e1' }}>•</span>
           <span style={{ color: '#64748b' }}>{dateStr}</span>
         </div>

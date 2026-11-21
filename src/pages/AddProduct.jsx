@@ -319,10 +319,19 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     const assignedPinType = isCable ? (variantDraft.pin_type || null) : null
     const assignedCableType = isCable ? (variantDraft.cable_type || null) : null
 
-    // Each variant gets strictly its own uploaded images, never falling back to other variants
-    const currentImgs = (variantDraft.images && variantDraft.images.length > 0)
+    // Image resolution:
+    // 1. Explicitly uploaded images in the draft
+    // 2. If no new images uploaded in draft, check if another variant in variantsList already has images for the SAME color
+    let currentImgs = (variantDraft.images && variantDraft.images.length > 0)
       ? [...variantDraft.images]
       : []
+
+    if (currentImgs.length === 0 && assignedColor) {
+      const sameColorSibling = variantsList.find(v => v.color === assignedColor && v.images && v.images.length > 0)
+      if (sameColorSibling) {
+        currentImgs = [...sameColorSibling.images]
+      }
+    }
 
     if (editingVariantId) {
       setVariantsList(prev => prev.map(v => v.id === editingVariantId ? {
@@ -430,6 +439,36 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       })
     }
     toast.success('Variant removed')
+  }
+
+  const handleTableVariantImageUpload = (variantId, e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    const newImgs = files.map((file, idx) => ({
+      file,
+      preview: URL.createObjectURL(file),
+      id: `vimg-${Date.now()}-${idx}-${Math.random().toString(36).slice(2)}`,
+      isPrimary: idx === 0,
+    }))
+
+    setVariantsList(prev => prev.map(v => {
+      if (v.id === variantId) {
+        const existing = v.images || []
+        const combined = [...existing, ...newImgs]
+        if (!combined.some(img => img.isPrimary) && combined.length > 0) {
+          combined[0].isPrimary = true
+        }
+        return {
+          ...v,
+          images: combined,
+        }
+      }
+      return v
+    }))
+
+    toast.success('Image attached to variant!')
+    e.target.value = ''
   }
 
   const [form, setForm] = useState({
@@ -1251,10 +1290,39 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           }
         }
 
-        // Upload images for this product variant (strictly isolated to this variant instance)
+        // Upload images for this product variant
+        // Priority order:
+        // 1. Direct images explicitly attached to this variant instance
+        // 2. Same-color variant fallback: If another variant with the exact same color has images, share that color's image
+        // 3. Draft images fallback (if user uploaded images in the builder draft)
+        // 4. Batch fallback (if user provided any image in this batch or product, ensure no variant gets an empty broken placeholder)
+        let resolvedImgs = (v.images && v.images.length > 0) ? v.images : []
+
+        if (resolvedImgs.length === 0 && variantColor) {
+          const sameColorSibling = effectiveVariants.find(
+            other => other.color === variantColor && other.images && other.images.length > 0
+          )
+          if (sameColorSibling) {
+            resolvedImgs = sameColorSibling.images
+          }
+        }
+
+        if (resolvedImgs.length === 0 && variantDraft.images && variantDraft.images.length > 0) {
+          resolvedImgs = variantDraft.images
+        }
+
+        if (resolvedImgs.length === 0) {
+          const anySiblingWithImgs = effectiveVariants.find(other => other.images && other.images.length > 0)
+          if (anySiblingWithImgs) {
+            resolvedImgs = anySiblingWithImgs.images
+          } else if (images && images.length > 0) {
+            resolvedImgs = images
+          }
+        }
+
         const targetImgs = targetId
-          ? (v.images !== undefined ? v.images : (variantDraft.images || []))
-          : ((v.images && v.images.length > 0) ? v.images : (effectiveVariants.length === 1 ? (variantDraft.images || []) : []))
+          ? (v.images !== undefined ? v.images : (resolvedImgs || []))
+          : resolvedImgs
 
         if (productUuid) {
           setUploadingImages(true)
@@ -2705,40 +2773,71 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                         variantsList.map((variant, idx) => (
                           <tr key={variant.id} style={{ borderBottom: '1px solid var(--border)' }}>
                             <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
-                              {(() => {
-                                const primaryImg = variant.images?.find(img => img.isPrimary) || variant.images?.[0]
-                                return primaryImg ? (
-                                  <div style={{ position: 'relative', width: '48px', height: '48px' }}>
-                                    <img
-                                      src={primaryImg.preview || primaryImg.public_url}
-                                      alt="variant"
-                                      style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)' }}
-                                    />
-                                    {variant.images.length > 1 && (
+                              <label
+                                style={{ cursor: 'pointer', display: 'inline-block', position: 'relative' }}
+                                title="Click to upload or change image for this variant"
+                              >
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  multiple
+                                  style={{ display: 'none' }}
+                                  onChange={(e) => handleTableVariantImageUpload(variant.id, e)}
+                                />
+                                {(() => {
+                                  const primaryImg = variant.images?.find(img => img.isPrimary) || variant.images?.[0]
+                                  return primaryImg ? (
+                                    <div style={{ position: 'relative', width: '48px', height: '48px' }}>
+                                      <img
+                                        src={primaryImg.preview || primaryImg.public_url}
+                                        alt="variant"
+                                        style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)' }}
+                                      />
+                                      {variant.images.length > 1 && (
+                                        <span style={{
+                                          position: 'absolute',
+                                          top: '-4px',
+                                          right: '-4px',
+                                          background: '#111827',
+                                          color: '#ffffff',
+                                          fontSize: '9px',
+                                          fontWeight: 700,
+                                          padding: '1px 4px',
+                                          borderRadius: '8px',
+                                        }}>
+                                          +{variant.images.length - 1}
+                                        </span>
+                                      )}
                                       <span style={{
                                         position: 'absolute',
-                                        top: '-4px',
-                                        right: '-4px',
+                                        bottom: '-2px',
+                                        right: '-2px',
                                         background: '#111827',
                                         color: '#ffffff',
-                                        fontSize: '9px',
-                                        fontWeight: 700,
-                                        padding: '1px 4px',
-                                        borderRadius: '8px',
+                                        borderRadius: '50%',
+                                        width: '16px',
+                                        height: '16px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
                                       }}>
-                                        +{variant.images.length - 1}
+                                        <Upload size={9} />
                                       </span>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div style={{
-                                    width: '48px', height: '48px', background: '#d1d5db', borderRadius: '6px',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280',
-                                  }}>
-                                    <ImageIcon size={22} />
-                                  </div>
-                                )
-                              })()}
+                                    </div>
+                                  ) : (
+                                    <div style={{
+                                      width: '48px', height: '48px', background: '#f3f4f6', borderRadius: '6px',
+                                      border: '1.5px dashed #9ca3af',
+                                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#4b5563',
+                                      transition: 'all 0.15s ease',
+                                    }}>
+                                      <Upload size={14} />
+                                      <span style={{ fontSize: '8px', fontWeight: 700, marginTop: '2px' }}>Upload</span>
+                                    </div>
+                                  )
+                                })()}
+                              </label>
                             </td>
                             <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--text-primary)', verticalAlign: 'middle' }}>
                               {variant.name}
