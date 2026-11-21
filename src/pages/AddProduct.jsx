@@ -155,34 +155,124 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
   const handleVariantImageSelect = (e) => {
     const files = Array.from(e.target.files || [])
-    const newImgs = files.map(file => ({
+    if (files.length === 0) return
+
+    const newImgs = files.map((file, idx) => ({
       file,
       preview: URL.createObjectURL(file),
-      id: `vimg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: `vimg-${Date.now()}-${idx}-${Math.random().toString(36).slice(2)}`,
+      isPrimary: false,
     }))
+
+    setVariantDraft(prev => {
+      const existing = prev.images || []
+      const combined = [...existing, ...newImgs]
+      // Ensure at least one image is marked as primary
+      if (!combined.some(img => img.isPrimary) && combined.length > 0) {
+        combined[0].isPrimary = true
+      }
+      return {
+        ...prev,
+        images: combined,
+      }
+    })
+
+    if (variantFileRef.current) {
+      variantFileRef.current.value = ''
+    }
+  }
+
+  const setPrimaryVariantImage = (id) => {
     setVariantDraft(prev => ({
       ...prev,
-      images: [...(prev.images || []), ...newImgs]
-    }))
-    setImages(prev => [...(prev || []), ...newImgs])
-
-    // Propagate to any variants already added to variantsList that have no images
-    setVariantsList(prev => prev.map(v => {
-      if (!v.images || v.images.length === 0) {
-        return { ...v, images: [...newImgs] }
-      }
-      return v
+      images: (prev.images || []).map(img => ({
+        ...img,
+        isPrimary: img.id === id,
+      })),
     }))
   }
 
-  const removeVariantImage = (id) => {
+  const clearVariantImages = () => {
     setVariantDraft(prev => ({
       ...prev,
-      images: (prev.images || []).filter(img => img.id !== id)
+      images: [],
     }))
+    if (variantFileRef.current) {
+      variantFileRef.current.value = ''
+    }
+  }
+
+  const removeVariantImage = (id) => {
+    setVariantDraft(prev => {
+      const remaining = (prev.images || []).filter(img => img.id !== id)
+      if (remaining.length > 0 && !remaining.some(img => img.isPrimary)) {
+        remaining[0].isPrimary = true
+      }
+      return {
+        ...prev,
+        images: remaining,
+      }
+    })
     setImages(prev => (prev || []).filter(img => img.id !== id))
     if (id && !String(id).startsWith('vimg-')) {
       setDeletedImageIds(prev => Array.from(new Set([...prev, id])))
+    }
+  }
+
+  const handleSplitImagesToVariants = () => {
+    if (!variantDraft.images || variantDraft.images.length <= 1) return
+
+    const requiresModel = shouldShowModelSelection && (form.mobile_brand === 'Apple' || form.mobile_brand === 'Samsung') && modelOptions.length > 0
+    if (requiresModel && !variantDraft.model) {
+      toast.error('Please select a Model before adding variants.')
+      return
+    }
+
+    const defaultProdTitle = form.name && form.name.trim()
+      ? form.name.trim()
+      : (isTemperedGlass ? 'Tempered Glass' : (isWatchStrap ? 'Watch Strap' : (isCable ? 'Cable' : 'Product')))
+    const baseVarName = variantDraft.name.trim() || defaultProdTitle
+
+    const newVariants = variantDraft.images.map((img, idx) => {
+      const singleImg = { ...img, isPrimary: true }
+      return {
+        ...variantDraft,
+        color: variantDraft.color || null,
+        model: variantDraft.model || null,
+        mah: isPowerBank ? (variantDraft.mah || null) : null,
+        strap_mm: isWatchStrap ? (variantDraft.strap_mm || null) : null,
+        pin_type: isCable ? (variantDraft.pin_type || null) : null,
+        cable_type: isCable ? (variantDraft.cable_type || null) : null,
+        images: [singleImg],
+        purchase_price: '0',
+        id: `variant-${Date.now()}-${idx}-${Math.random().toString(36).slice(2)}`,
+        name: variantDraft.name.trim() || `${baseVarName} ${variantsList.length + idx + 1}`,
+      }
+    })
+
+    setVariantsList(prev => [...prev, ...newVariants])
+    toast.success(`Added ${newVariants.length} product variants (1 per image)!`)
+
+    // Reset draft completely
+    setVariantDraft({
+      name: '',
+      brand_name: '',
+      description: '',
+      purchase_price: '0',
+      mrp: '',
+      selling_price: '',
+      quantity: '',
+      color: '',
+      model: '',
+      mah: '',
+      strap_mm: '',
+      pin_type: '',
+      cable_type: '',
+      images: [],
+    })
+
+    if (variantFileRef.current) {
+      variantFileRef.current.value = ''
     }
   }
 
@@ -229,10 +319,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     const assignedPinType = isCable ? (variantDraft.pin_type || null) : null
     const assignedCableType = isCable ? (variantDraft.cable_type || null) : null
 
-    // Retain uploaded images so they persist across variants in a multi-variant batch
+    // Each variant gets strictly its own uploaded images, never falling back to other variants
     const currentImgs = (variantDraft.images && variantDraft.images.length > 0)
-      ? variantDraft.images
-      : (images && images.length > 0 ? images : [])
+      ? [...variantDraft.images]
+      : []
 
     if (editingVariantId) {
       setVariantsList(prev => prev.map(v => v.id === editingVariantId ? {
@@ -272,10 +362,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       toast.success('Product variant added!')
     }
 
-    if (currentImgs.length > 0) {
-      setImages(currentImgs)
-    }
-
+    // Always reset variantDraft with FRESH EMPTY images for subsequent variants
     setVariantDraft({
       name: '',
       brand_name: '',
@@ -290,8 +377,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       strap_mm: '',
       pin_type: '',
       cable_type: '',
-      images: currentImgs, // Keep image previews active for subsequent variants
+      images: [], // Fresh empty array so next variant never inherits previous images
     })
+
+    if (variantFileRef.current) {
+      variantFileRef.current.value = ''
+    }
   }
 
   const handleEditVariant = (variant) => {
@@ -985,13 +1076,6 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       // In-memory batch upload cache to avoid uploading identical image files repeatedly across 10+ variants
       const batchUploadCache = new Map()
 
-      // Master fallback images across all sources (images state, variantDraft, or any variant in effectiveVariants)
-      const masterFallbackImages = (images && images.length > 0)
-        ? images
-        : (variantDraft.images && variantDraft.images.length > 0)
-          ? variantDraft.images
-          : (effectiveVariants.find(v => v.images && v.images.length > 0)?.images || [])
-
       // Iterate through variants and create EACH variant as a single standalone product
       for (let i = 0; i < effectiveVariants.length; i++) {
         const v = effectiveVariants[i]
@@ -1167,10 +1251,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           }
         }
 
-        // Upload images for this product variant
+        // Upload images for this product variant (strictly isolated to this variant instance)
         const targetImgs = targetId
           ? (v.images !== undefined ? v.images : (variantDraft.images || []))
-          : ((v.images && v.images.length > 0) ? v.images : masterFallbackImages)
+          : ((v.images && v.images.length > 0) ? v.images : (effectiveVariants.length === 1 ? (variantDraft.images || []) : []))
 
         if (productUuid) {
           setUploadingImages(true)
@@ -1438,7 +1522,55 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
                 {/* Add Image (Multi Image Select) */}
                 <div>
-                  <label className="form-label" style={{ marginBottom: '8px' }}>Add Image</label>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>Add Image</label>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>(Multi Image Select)</span>
+                    </div>
+
+                    {variantDraft.images && variantDraft.images.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {variantDraft.images.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={handleSplitImagesToVariants}
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              color: '#1d4ed8',
+                              background: '#eff6ff',
+                              border: '1px solid #bfdbfe',
+                              borderRadius: '4px',
+                              padding: '3px 8px',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                            title="Quickly create a separate product variant for each of the selected images"
+                          >
+                            ⚡ Add {variantDraft.images.length} variants (1 per image)
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={clearVariantImages}
+                          style={{
+                            fontSize: '11px',
+                            color: 'var(--text-muted)',
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
+                            padding: 0,
+                          }}
+                        >
+                          Clear images
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <div
                       onClick={() => variantFileRef.current?.click()}
@@ -1477,20 +1609,42 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                     {variantDraft.images && variantDraft.images.map(img => (
                       <div
                         key={img.id}
+                        onClick={() => setPrimaryVariantImage(img.id)}
                         style={{
                           position: 'relative',
                           width: '96px',
                           height: '96px',
                           borderRadius: '8px',
                           overflow: 'hidden',
-                          border: '1px solid var(--border-strong)',
+                          border: img.isPrimary ? '2px solid #10b981' : '1px solid var(--border-strong)',
                           background: '#ffffff',
+                          cursor: 'pointer',
                         }}
+                        title={img.isPrimary ? 'Primary thumbnail image' : 'Click to set as Primary thumbnail'}
                       >
                         <img src={img.preview} alt="variant-preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        {img.isPrimary && (
+                          <span style={{
+                            position: 'absolute',
+                            bottom: '4px',
+                            left: '4px',
+                            background: '#10b981',
+                            color: '#ffffff',
+                            fontSize: '9px',
+                            fontWeight: 800,
+                            padding: '1px 5px',
+                            borderRadius: '3px',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                          }}>
+                            PRIMARY
+                          </span>
+                        )}
                         <button
                           type="button"
-                          onClick={() => removeVariantImage(img.id)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removeVariantImage(img.id)
+                          }}
                           style={{
                             position: 'absolute',
                             top: '4px',
@@ -1506,6 +1660,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                             justifyContent: 'center',
                             cursor: 'pointer',
                           }}
+                          title="Remove image"
                         >
                           <X size={12} />
                         </button>
@@ -2550,20 +2705,40 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                         variantsList.map((variant, idx) => (
                           <tr key={variant.id} style={{ borderBottom: '1px solid var(--border)' }}>
                             <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
-                              {variant.images && variant.images.length > 0 ? (
-                                <img
-                                  src={variant.images[0].preview}
-                                  alt="variant"
-                                  style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)' }}
-                                />
-                              ) : (
-                                <div style={{
-                                  width: '48px', height: '48px', background: '#d1d5db', borderRadius: '6px',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280',
-                                }}>
-                                  <ImageIcon size={22} />
-                                </div>
-                              )}
+                              {(() => {
+                                const primaryImg = variant.images?.find(img => img.isPrimary) || variant.images?.[0]
+                                return primaryImg ? (
+                                  <div style={{ position: 'relative', width: '48px', height: '48px' }}>
+                                    <img
+                                      src={primaryImg.preview || primaryImg.public_url}
+                                      alt="variant"
+                                      style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)' }}
+                                    />
+                                    {variant.images.length > 1 && (
+                                      <span style={{
+                                        position: 'absolute',
+                                        top: '-4px',
+                                        right: '-4px',
+                                        background: '#111827',
+                                        color: '#ffffff',
+                                        fontSize: '9px',
+                                        fontWeight: 700,
+                                        padding: '1px 4px',
+                                        borderRadius: '8px',
+                                      }}>
+                                        +{variant.images.length - 1}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div style={{
+                                    width: '48px', height: '48px', background: '#d1d5db', borderRadius: '6px',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280',
+                                  }}>
+                                    <ImageIcon size={22} />
+                                  </div>
+                                )
+                              })()}
                             </td>
                             <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--text-primary)', verticalAlign: 'middle' }}>
                               {variant.name}
