@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { fetchMergedCategories } from '../lib/categoryStorage'
 import ProductImageHover from '../components/common/ProductImageHover'
+import { compressImage, uploadToStorageWithRetry } from '../lib/imageUtils'
 
 const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val)
 const generateUUID = () => {
@@ -375,26 +376,29 @@ const AddCombo = () => {
       const isPrimary = img.isPrimary || i === 0
 
       if (img.file) {
-        const ext = (img.file.name || 'image.png').split('.').pop()
+        // Client-side compression safeguard
+        const fileToUpload = await compressImage(img.file)
+        const ext = (fileToUpload.name || img.file.name || 'image.jpg').split('.').pop()
         const storagePath = `combos/${comboId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
-        const { error: uploadErr } = await supabase.storage
-          .from('product-images')
-          .upload(storagePath, img.file, {
-            contentType: img.file.type || 'image/jpeg',
+        const { publicUrl, error: uploadErr } = await uploadToStorageWithRetry(
+          supabase,
+          'product-images',
+          storagePath,
+          fileToUpload,
+          {
+            contentType: fileToUpload.type || 'image/jpeg',
             cacheControl: '3600',
             upsert: true,
-          })
+          },
+          2
+        )
 
         if (uploadErr) {
-          console.error('Combo image upload error:', uploadErr)
-          toast.error(`Image upload failed: ${uploadErr.message}`)
+          console.error('Combo image upload error after retries:', uploadErr)
+          toast.error(`Image upload failed: ${uploadErr.message || 'Network error'}`)
           continue
         }
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('product-images')
-          .getPublicUrl(storagePath)
 
         results.push({
           url: publicUrl,

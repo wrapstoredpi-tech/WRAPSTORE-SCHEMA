@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { fetchMergedCategories } from '../lib/categoryStorage'
 import { getMrp } from '../lib/productUtils'
+import { compressImage, uploadToStorageWithRetry } from '../lib/imageUtils'
 
 const IPHONE_MODELS = [
   'iPhone Duo',
@@ -153,7 +154,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     images: [],
   })
 
-  const handleVariantImageSelect = (e) => {
+  const handleVariantImageSelect = async (e) => {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
 
@@ -179,6 +180,21 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
     if (variantFileRef.current) {
       variantFileRef.current.value = ''
+    }
+
+    // Compress in background so subsequent uploads are lightweight and instant
+    for (const item of newImgs) {
+      try {
+        const compressed = await compressImage(item.file)
+        if (compressed && compressed !== item.file) {
+          setVariantDraft(prev => ({
+            ...prev,
+            images: (prev.images || []).map(img => img.id === item.id ? { ...img, file: compressed } : img),
+          }))
+        }
+      } catch (err) {
+        console.warn('Background image compression note:', err)
+      }
     }
   }
 
@@ -441,7 +457,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     toast.success('Variant removed')
   }
 
-  const handleTableVariantImageUpload = (variantId, e) => {
+  const handleTableVariantImageUpload = async (variantId, e) => {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
 
@@ -469,6 +485,26 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
     toast.success('Image attached to variant!')
     e.target.value = ''
+
+    // Compress in background so subsequent uploads are lightweight and instant
+    for (const item of newImgs) {
+      try {
+        const compressed = await compressImage(item.file)
+        if (compressed && compressed !== item.file) {
+          setVariantsList(prev => prev.map(v => {
+            if (v.id === variantId) {
+              return {
+                ...v,
+                images: (v.images || []).map(img => img.id === item.id ? { ...img, file: compressed } : img),
+              }
+            }
+            return v
+          }))
+        }
+      } catch (err) {
+        console.warn('Background variant image compression note:', err)
+      }
+    }
   }
 
   const [form, setForm] = useState({
@@ -929,25 +965,32 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         let fileUploadInfo = uploadCache.get(cacheKey)
 
         if (!fileUploadInfo) {
-          const ext = (img.file.name || 'image.png').split('.').pop()
+          // 1. Client-side compression safeguard before uploading (converts heavy camera photos from 10MB to ~250KB)
+          const fileToUpload = await compressImage(img.file)
+
+          const ext = (fileToUpload.name || img.file.name || 'image.jpg').split('.').pop()
           const path = `products/${productUuid}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
-          const { error: uploadErr } = await supabase.storage
-            .from('product-images')
-            .upload(path, img.file, { contentType: img.file.type || 'image/jpeg', cacheControl: '3600', upsert: false })
+          const { publicUrl, error: uploadErr } = await uploadToStorageWithRetry(
+            supabase,
+            'product-images',
+            path,
+            fileToUpload,
+            { contentType: fileToUpload.type || 'image/jpeg', cacheControl: '3600', upsert: true },
+            2
+          )
 
           if (uploadErr) {
-            console.error('Supabase storage upload error:', uploadErr)
-            toast.error(`Image upload failed: ${uploadErr.message}`)
+            console.error('Supabase storage upload error after retries:', uploadErr)
+            toast.error(`Image upload failed for ${img.file.name || 'variant'}: ${uploadErr.message || 'Network timeout'}`)
             continue
           }
 
-          const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(path)
           fileUploadInfo = {
             storage_path: path,
             public_url: publicUrl,
-            file_name: img.file.name,
-            file_size: img.file.size,
+            file_name: fileToUpload.name || img.file.name,
+            file_size: fileToUpload.size,
           }
           uploadCache.set(cacheKey, fileUploadInfo)
         }
@@ -1111,6 +1154,7 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       }
 
       let createdCount = 0
+      let imageUploadFailedCount = 0
 
       // In-memory batch upload cache to avoid uploading identical image files repeatedly across 10+ variants
       const batchUploadCache = new Map()
@@ -1427,14 +1471,16 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                   console.error('Failed to insert product_images rows:', insertImgErr)
                   toast.error(`Image upload failed: ${insertImgErr.message}`)
                 }
-                if (isLocalFallback) {
-                  const localProds = getLocalProducts()
-                  const idx = localProds.findIndex(p => p.id === productUuid)
-                  if (idx !== -1) {
-                    localProds[idx].product_images = [...(localProds[idx].product_images || []), ...newImageRecords]
-                    localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(localProds))
-                  }
-                }
+              } else {
+                imageUploadFailedCount++
+              }
+
+              // Always sync local storage cache with product images
+              const localProds = getLocalProducts()
+              const idx = localProds.findIndex(p => p.id === productUuid)
+              if (idx !== -1) {
+                localProds[idx].product_images = [...(localProds[idx].product_images || []), ...newImageRecords]
+                localStorage.setItem('wrapstore_custom_products_v1', JSON.stringify(localProds))
               }
             }
           }
@@ -1444,6 +1490,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         createdCount++
       }
 
+      if (imageUploadFailedCount > 0) {
+        toast.error(`Products created, but ${imageUploadFailedCount} variant image(s) could not be uploaded due to network interruption. You can edit the products to attach images.`, { duration: 6000 })
+      }
       toast.success(createdCount === 1 ? '1 product submitted for approval!' : `${createdCount} products submitted for approval!`)
 
       if (onSave) onSave()
