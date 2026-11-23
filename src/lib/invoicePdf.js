@@ -59,17 +59,17 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
   })
 
   // Dimensions & Margins
-  // Thermal paper print area: 3.04 inches (218.88 pt) out of 4.00 inches (288 pt)
-  // The remaining 0.96 inches (69.12 pt) on the right is left completely empty for paper margins/spacing
+  // Spec: 4 × 4 inches = 288 × 288 pt in landscape orientation
+  // Fit to paper with 30px (30 pt) margins on left and right
   const PAGE_W = 288
   const PAGE_H = 288
-  const MARGIN_LEFT = 3.6     // 0.050 inches * 72 pt/in (prevents thermal cut-off on left)
-  const RIGHT_X = 218.88      // 3.040 inches * 72 pt/in (exact right boundary of print area)
-  const MARGIN_RIGHT = PAGE_W - RIGHT_X // 69.12 pt (0.960 inches empty space on the right)
+  const MARGIN_LEFT = 30      // 30px gap on left
+  const MARGIN_RIGHT = 30     // 30px gap on right
+  const RIGHT_X = PAGE_W - MARGIN_RIGHT // 258 pt (exact right boundary of print area)
   const MARGIN_TOP = 7.2      // 0.100 inches * 72 pt/in
   const MARGIN_BOTTOM = 7.2   // 0.100 inches * 72 pt/in
-  const CONTENT_W = RIGHT_X - MARGIN_LEFT // 215.28 pt (usable print area width)
-  const CONTENT_CENTER_X = MARGIN_LEFT + CONTENT_W / 2 // 111.24 pt (horizontal center of print area)
+  const CONTENT_W = PAGE_W - MARGIN_LEFT - MARGIN_RIGHT // 228 pt (usable print area width)
+  const CONTENT_CENTER_X = PAGE_W / 2 // 144 pt (horizontal center of paper)
 
   // Color palette matching WrapStore brand
   const NAVY = [15, 23, 42]        // #0F172A
@@ -299,11 +299,11 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
       fillColor: [248, 250, 252],
     },
     columnStyles: {
-      0: { cellWidth: 9.00, halign: 'center', fontSize: 6.2 },
-      1: { cellWidth: 98.28, fontSize: 6.0 },    // Product & Description (reduced by 20%)
+      0: { cellWidth: 10.00, halign: 'center', fontSize: 6.2 },
+      1: { cellWidth: 112.00, fontSize: 6.0 },    // Product & Description
       2: { cellWidth: 16.00, halign: 'center', fontStyle: 'bold', fontSize: 6.5 }, // Qty
-      3: { cellWidth: 45.00, halign: 'right', fontSize: 6.2, cellPadding: { top: 2.5, bottom: 2.5, left: 1, right: 1.5 } }, // Price
-      4: { cellWidth: 47.00, halign: 'right', fontStyle: 'bold', fontSize: 6.2, cellPadding: { top: 2.5, bottom: 2.5, left: 1, right: 1.5 } }, // Total
+      3: { cellWidth: 44.00, halign: 'right', fontSize: 6.2, cellPadding: { top: 2.5, bottom: 2.5, left: 1, right: 1.5 } }, // Price
+      4: { cellWidth: 46.00, halign: 'right', fontStyle: 'bold', fontSize: 6.2, cellPadding: { top: 2.5, bottom: 2.5, left: 1, right: 1.5 } }, // Total
     },
     margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT, top: 10, bottom: 10 },
     styles: { overflow: 'linebreak', font: 'helvetica' },
@@ -319,7 +319,7 @@ export const generateInvoicePDF = async ({ invoice = {}, items = [], store = {},
   // 5. FINANCIAL SUMMARY (Two-Column Grid)
   // Typography: Summary labels 7.5pt/400, Summary values 7.5pt/600, Grand total 9.5pt/700
   // ====================================================
-  const totalsW = 138
+  const totalsW = 140
   const totalsX = RIGHT_X - totalsW
 
   // If totals block exceeds page boundary, paginate cleanly to next continuous 4x4 page

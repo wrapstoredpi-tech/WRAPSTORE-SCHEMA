@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Upload, X, Star, Image as ImageIcon, Save, Info, Edit3, Plus } from 'lucide-react'
+import { ArrowLeft, Upload, X, Star, Image as ImageIcon, Save, Info, Edit3, Plus, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -337,13 +337,30 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
 
     // Image resolution:
     // 1. Explicitly uploaded images in the draft
-    // 2. If no new images uploaded in draft, check if another variant in variantsList already has images for the SAME color
-    let currentImgs = (variantDraft.images && variantDraft.images.length > 0)
-      ? [...variantDraft.images]
-      : []
+    // 2. If multi-image uploaded in draft with color selection, use primary/first and keep rest for next colors
+    // 3. If no new images uploaded in draft, check if another variant in variantsList already has images for the SAME color
+    let currentImgs = []
+    let remainingDraftImgs = []
 
-    if (currentImgs.length === 0 && assignedColor) {
-      const sameColorSibling = variantsList.find(v => v.color === assignedColor && v.images && v.images.length > 0)
+    if (variantDraft.images && variantDraft.images.length > 0) {
+      if (variantDraft.images.length > 1 && shouldShowColourVariants && assignedColor) {
+        const primaryIdx = variantDraft.images.findIndex(img => img.isPrimary)
+        const chosenIdx = primaryIdx >= 0 ? primaryIdx : 0
+        currentImgs = [variantDraft.images[chosenIdx]]
+        remainingDraftImgs = variantDraft.images.filter((_, idx) => idx !== chosenIdx)
+        if (remainingDraftImgs.length > 0 && !remainingDraftImgs.some(img => img.isPrimary)) {
+          remainingDraftImgs[0].isPrimary = true
+        }
+      } else {
+        currentImgs = [...variantDraft.images]
+        remainingDraftImgs = []
+      }
+    } else if (assignedColor) {
+      const normColor = assignedColor.trim().toLowerCase()
+      const sameColorSibling = variantsList.find(v =>
+        (v.color || v.color_variant || v.color_variants || '').trim().toLowerCase() === normColor &&
+        v.images && v.images.length > 0
+      )
       if (sameColorSibling) {
         currentImgs = [...sameColorSibling.images]
       }
@@ -383,11 +400,27 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           : `variant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         name: variantDraft.name.trim() || (varSuffixes ? `${defaultProdTitle} - ${varSuffixes}` : `${defaultProdTitle} ${variantsList.length + 1}`),
       }
-      setVariantsList(prev => [...prev, newVar])
-      toast.success('Product variant added!')
+
+      setVariantsList(prev => {
+        const normColor = (assignedColor || '').trim().toLowerCase()
+        const updatedPrev = prev.map(v => {
+          const vColor = (v.color || v.color_variant || v.color_variants || '').trim().toLowerCase()
+          if (normColor && vColor === normColor && (!v.images || v.images.length === 0) && currentImgs.length > 0) {
+            return { ...v, images: [...currentImgs] }
+          }
+          return v
+        })
+        return [...updatedPrev, newVar]
+      })
+
+      if (remainingDraftImgs.length > 0) {
+        toast.success(`Added "${assignedColor || 'variant'}"! (${remainingDraftImgs.length} photo${remainingDraftImgs.length > 1 ? 's' : ''} ready for next color)`)
+      } else {
+        toast.success('Product variant added!')
+      }
     }
 
-    // Always reset variantDraft with FRESH EMPTY images for subsequent variants
+    // Reset variantDraft, keeping remaining draft images if multi-image sequence is in progress
     setVariantDraft({
       name: '',
       brand_name: '',
@@ -402,10 +435,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       strap_mm: '',
       pin_type: '',
       cable_type: '',
-      images: [], // Fresh empty array so next variant never inherits previous images
+      images: remainingDraftImgs,
     })
 
-    if (variantFileRef.current) {
+    if (remainingDraftImgs.length === 0 && variantFileRef.current) {
       variantFileRef.current.value = ''
     }
   }
@@ -461,6 +494,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
 
+    const targetVariant = variantsList.find(v => v.id === variantId)
+    const targetColor = (targetVariant?.color || targetVariant?.color_variant || targetVariant?.color_variants || '').trim().toLowerCase()
+
     const newImgs = files.map((file, idx) => ({
       file,
       preview: URL.createObjectURL(file),
@@ -469,8 +505,12 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
     }))
 
     setVariantsList(prev => prev.map(v => {
-      if (v.id === variantId) {
-        const existing = v.images || []
+      const isTarget = v.id === variantId
+      const vColor = (v.color || v.color_variant || v.color_variants || '').trim().toLowerCase()
+      const isSameColor = targetColor && vColor === targetColor
+
+      if (isTarget || isSameColor) {
+        const existing = isTarget ? (v.images || []) : []
         const combined = [...existing, ...newImgs]
         if (!combined.some(img => img.isPrimary) && combined.length > 0) {
           combined[0].isPrimary = true
@@ -483,7 +523,16 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
       return v
     }))
 
-    toast.success('Image attached to variant!')
+    if (targetColor) {
+      const matchCount = variantsList.filter(v => (v.color || v.color_variant || v.color_variants || '').trim().toLowerCase() === targetColor).length
+      if (matchCount > 1) {
+        toast.success(`Image attached to all ${matchCount} "${targetVariant?.color}" variants!`)
+      } else {
+        toast.success('Image attached to variant!')
+      }
+    } else {
+      toast.success('Image attached to variant!')
+    }
     e.target.value = ''
 
     // Compress in background so subsequent uploads are lightweight and instant
@@ -492,7 +541,10 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         const compressed = await compressImage(item.file)
         if (compressed && compressed !== item.file) {
           setVariantsList(prev => prev.map(v => {
-            if (v.id === variantId) {
+            const isTarget = v.id === variantId
+            const vColor = (v.color || v.color_variant || v.color_variants || '').trim().toLowerCase()
+            const isSameColor = targetColor && vColor === targetColor
+            if (isTarget || isSameColor) {
               return {
                 ...v,
                 images: (v.images || []).map(img => img.id === item.id ? { ...img, file: compressed } : img),
@@ -1108,6 +1160,31 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         return
       }
 
+      // Pre-flight same-color image synchronization across the entire batch
+      // If ANY variant of a specific color has an image, ensure ALL variants of that same color share it
+      const colorToImages = new Map()
+      effectiveVariants.forEach(v => {
+        const c = (v.color || v.color_variant || v.color_variants || '').trim().toLowerCase()
+        if (c && v.images && v.images.length > 0 && !colorToImages.has(c)) {
+          colorToImages.set(c, v.images)
+        }
+      })
+
+      if (variantDraft.color && variantDraft.images && variantDraft.images.length > 0) {
+        const c = variantDraft.color.trim().toLowerCase()
+        if (!colorToImages.has(c)) {
+          colorToImages.set(c, variantDraft.images)
+        }
+      }
+
+      effectiveVariants = effectiveVariants.map(v => {
+        const c = (v.color || v.color_variant || v.color_variants || '').trim().toLowerCase()
+        if (c && (!v.images || v.images.length === 0) && colorToImages.has(c)) {
+          return { ...v, images: [...colorToImages.get(c)] }
+        }
+        return v
+      })
+
       // Ensure category_id and subcategory_id are valid UUIDs or null
       let resolvedCategoryId = isValidUuid(form.category_id) ? form.category_id : null
       if (!resolvedCategoryId && categories.length > 0) {
@@ -1343,8 +1420,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
         let resolvedImgs = (v.images && v.images.length > 0) ? v.images : []
 
         if (resolvedImgs.length === 0 && variantColor) {
+          const normColor = variantColor.trim().toLowerCase()
           const sameColorSibling = effectiveVariants.find(
-            other => other.color === variantColor && other.images && other.images.length > 0
+            other => (other.color || other.color_variant || other.color_variants || '').trim().toLowerCase() === normColor && other.images && other.images.length > 0
           )
           if (sameColorSibling) {
             resolvedImgs = sameColorSibling.images
@@ -1355,7 +1433,8 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
           resolvedImgs = variantDraft.images
         }
 
-        if (resolvedImgs.length === 0) {
+        if (resolvedImgs.length === 0 && !variantColor) {
+          // For items without color variants (e.g. single universal accessory), fallback to any available image in this submission
           const anySiblingWithImgs = effectiveVariants.find(other => other.images && other.images.length > 0)
           if (anySiblingWithImgs) {
             resolvedImgs = anySiblingWithImgs.images
@@ -2876,9 +2955,9 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                                     </div>
                                   ) : (
                                     <div style={{
-                                      width: '48px', height: '48px', background: '#f3f4f6', borderRadius: '6px',
-                                      border: '1.5px dashed #9ca3af',
-                                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#4b5563',
+                                      width: '48px', height: '48px', background: '#fef2f2', borderRadius: '6px',
+                                      border: '1.5px dashed #f87171',
+                                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#dc2626',
                                       transition: 'all 0.15s ease',
                                     }}>
                                       <Upload size={14} />
@@ -3002,6 +3081,26 @@ const AddProduct = ({ prefillData = null, onSave = null }) => {
                     </tbody>
                   </table>
                 </div>
+
+                {variantsList.length > 0 && variantsList.some(v => !v.images || v.images.length === 0) && (
+                  <div style={{
+                    background: '#fffbeb',
+                    border: '1px solid #fde68a',
+                    borderRadius: 'var(--radius)',
+                    padding: '10px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '12px',
+                    color: '#92400e',
+                    marginTop: '10px',
+                  }}>
+                    <AlertCircle size={16} style={{ flexShrink: 0, color: '#d97706' }} />
+                    <span>
+                      <strong>Missing images alert:</strong> {variantsList.filter(v => !v.images || v.images.length === 0).length} of {variantsList.length} variant(s) don't have images yet. Click the red <strong>Upload</strong> box on any row to attach photos (uploading for a color auto-applies to all models of that color).
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
